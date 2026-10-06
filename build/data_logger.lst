@@ -1,4 +1,4 @@
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 1
 
 
    1              		.cpu cortex-m4
@@ -58,7 +58,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
   28:Core/Src/data_logger.c ****     int16_t  minimum_x100;
   29:Core/Src/data_logger.c ****     int16_t  maximum_x100;
   30:Core/Src/data_logger.c ****     uint16_t sample_count;
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 2
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 2
 
 
   31:Core/Src/data_logger.c ****     uint16_t crc;
@@ -118,7 +118,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
   60              		.loc 1 52 14 view .LVU12
   61              		.loc 1 52 22 is_stmt 0 view .LVU13
   62 0012 0023     		movs	r3, #0
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 3
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 3
 
 
   63              		.loc 1 52 9 view .LVU14
@@ -178,7 +178,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
  106              		.thumb_func
  108              	DataLogger_Address:
  109              	.LVL13:
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 4
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 4
 
 
  110              	.LFB1262:
@@ -238,7 +238,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
  155 0004 07D8     		bhi	.L17
   72:Core/Src/data_logger.c ****     {
   73:Core/Src/data_logger.c ****         if (words[index] != 0xFFFFFFFFUL)
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 5
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 5
 
 
  156              		.loc 1 73 9 is_stmt 1 view .LVU38
@@ -298,7 +298,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
  199              	.LFB1264:
   81:Core/Src/data_logger.c **** 
   82:Core/Src/data_logger.c **** static uint8_t DataLogger_IsValid(const DataLogFlashRecord_t *record)
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 6
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 6
 
 
   83:Core/Src/data_logger.c **** {
@@ -358,7 +358,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
  243              	.LVL25:
   86:Core/Src/data_logger.c ****     }
  244              		.loc 1 86 16 view .LVU63
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 7
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 7
 
 
  245 0022 7047     		bx	lr
@@ -418,7 +418,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
  294              		.loc 1 97 14 view .LVU74
  295 0014 120B     		lsrs	r2, r2, #12
  296              	.LVL28:
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 8
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 8
 
 
   98:Core/Src/data_logger.c ****                           DATA_LOG_FLASH_PAGE;
@@ -478,7 +478,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
  335              		.cfi_def_cfa_offset 8
  336              		@ sp needed
  337 003a 10BD     		pop	{r4, pc}
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 9
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 9
 
 
  338              	.LVL34:
@@ -538,7 +538,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
  121:Core/Src/data_logger.c ****     uint8_t found = 0U;
  384              		.loc 1 121 13 view .LVU102
  385 0006 2546     		mov	r5, r4
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 10
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 10
 
 
  120:Core/Src/data_logger.c ****     uint8_t found = 0U;
@@ -598,7 +598,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
  125:Core/Src/data_logger.c ****         if (DataLogger_IsValid(record))
  422              		.loc 1 125 9 is_stmt 1 view .LVU117
  125:Core/Src/data_logger.c ****         if (DataLogger_IsValid(record))
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 11
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 11
 
 
  423              		.loc 1 125 48 is_stmt 0 view .LVU118
@@ -658,7 +658,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
  141:Core/Src/data_logger.c ****         s_next_sequence = 0U;
  461              		.loc 1 141 9 is_stmt 1 view .LVU132
  462              		.loc 1 141 25 is_stmt 0 view .LVU133
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 12
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 12
 
 
  463 0050 174A     		ldr	r2, .L43+12
@@ -718,7 +718,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
  488 0066 08F10103 		add	r3, r8, #1
  145:Core/Src/data_logger.c ****         s_next_sequence = newest_sequence + 1U;
  489              		.loc 1 145 23 view .LVU143
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 13
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 13
 
 
  490 006a 1049     		ldr	r1, .L43+8
@@ -778,7 +778,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
  529 0096 0026     		movs	r6, #0
  530              	.LVL52:
  159:Core/Src/data_logger.c ****             s_next_sequence = 0U;
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 14
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 14
 
 
  531              		.loc 1 159 27 view .LVU159
@@ -838,7 +838,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
  576              		.cfi_offset 8, -12
  577              		.cfi_offset 9, -8
  578              		.cfi_offset 14, -4
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 15
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 15
 
 
  579 0004 8BB0     		sub	sp, sp, #44
@@ -898,7 +898,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
  186:Core/Src/data_logger.c ****     {
  187:Core/Src/data_logger.c ****         if (DataLogger_EraseAll() != HAL_OK)
  623              		.loc 1 187 9 is_stmt 1 view .LVU181
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 16
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 16
 
 
  624              		.loc 1 187 13 is_stmt 0 view .LVU182
@@ -958,7 +958,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
  201:Core/Src/data_logger.c ****     record.maximum_x100 = maximum_x100;
  665              		.loc 1 201 5 is_stmt 1 view .LVU201
  666              		.loc 1 201 25 is_stmt 0 view .LVU202
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 17
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 17
 
 
  667 0068 ADF81860 		strh	r6, [sp, #24]	@ movhi
@@ -1018,7 +1018,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
  709              	.LVL64:
  710              	.L48:
  711              	.LBB9:
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 18
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 18
 
 
  712              		.loc 1 212 32 is_stmt 1 discriminator 1 view .LVU221
@@ -1078,7 +1078,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
  225:Core/Src/data_logger.c **** 
  226:Core/Src/data_logger.c ****     if (status == HAL_OK)
  750              		.loc 1 226 5 view .LVU234
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 19
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 19
 
 
  751              		.loc 1 226 8 is_stmt 0 view .LVU235
@@ -1138,7 +1138,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
  795 00f8 00000000 		.word	__data_log_start
  796 00fc 00000000 		.word	.LANCHOR1
  797 0100 00000000 		.word	.LANCHOR2
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 20
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 20
 
 
  798 0104 474F4C54 		.word	1414287175
@@ -1198,7 +1198,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
  842 0014 FFF7FEFF 		bl	DataLogger_Address
  843              	.LVL73:
  844              		.loc 1 245 44 view .LVU253
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 21
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 21
 
 
  845 0018 0546     		mov	r5, r0
@@ -1258,7 +1258,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
  886 0040 00E0     		b	.L59
  887              	.LVL76:
  888              	.L60:
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 22
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 22
 
 
  242:Core/Src/data_logger.c ****     }
@@ -1318,7 +1318,7 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
  935              		@ link register save eliminated.
  263:Core/Src/data_logger.c ****     return s_record_count;
  936              		.loc 1 263 5 view .LVU285
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 23
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 23
 
 
  264:Core/Src/data_logger.c **** }...
@@ -1362,44 +1362,44 @@ ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
  983              		.file 8 "Core/Inc/data_logger.h"
  984              		.file 9 "Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_hal_flash_ex.h"
  985              		.file 10 "<built-in>"
-ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 24
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s 			page 24
 
 
 DEFINED SYMBOLS
                             *ABS*:00000000 data_logger.c
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:20     .text.DataLogger_Crc16:00000000 $t
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:25     .text.DataLogger_Crc16:00000000 DataLogger_Crc16
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:103    .text.DataLogger_Address:00000000 $t
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:108    .text.DataLogger_Address:00000000 DataLogger_Address
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:126    .text.DataLogger_Address:00000008 $d
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:131    .text.DataLogger_IsEmpty:00000000 $t
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:136    .text.DataLogger_IsEmpty:00000000 DataLogger_IsEmpty
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:192    .text.DataLogger_IsValid:00000000 $t
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:197    .text.DataLogger_IsValid:00000000 DataLogger_IsValid
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:256    .text.DataLogger_IsValid:00000028 $d
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:261    .text.DataLogger_EraseAll:00000000 $t
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:266    .text.DataLogger_EraseAll:00000000 DataLogger_EraseAll
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:343    .text.DataLogger_EraseAll:0000003c $d
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:349    .text.DataLogger_Init:00000000 $t
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:355    .text.DataLogger_Init:00000000 DataLogger_Init
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:545    .text.DataLogger_Init:000000a4 $d
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:555    .text.DataLogger_Append:00000000 $t
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:561    .text.DataLogger_Append:00000000 DataLogger_Append
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:792    .text.DataLogger_Append:000000ec $d
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:803    .text.DataLogger_Read:00000000 $t
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:809    .text.DataLogger_Read:00000000 DataLogger_Read
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:917    .text.DataLogger_Read:00000054 $d
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:923    .text.DataLogger_GetRecordCount:00000000 $t
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:929    .text.DataLogger_GetRecordCount:00000000 DataLogger_GetRecordCount
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:944    .text.DataLogger_GetRecordCount:00000008 $d
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:952    .bss.s_initialized:00000000 s_initialized
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:953    .bss.s_initialized:00000000 $d
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:955    .bss.s_next_sequence:00000000 $d
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:959    .bss.s_next_sequence:00000000 s_next_sequence
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:962    .bss.s_record_count:00000000 $d
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:966    .bss.s_record_count:00000000 s_record_count
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:969    .bss.s_write_index:00000000 $d
-C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:973    .bss.s_write_index:00000000 s_write_index
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:20     .text.DataLogger_Crc16:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:25     .text.DataLogger_Crc16:00000000 DataLogger_Crc16
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:103    .text.DataLogger_Address:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:108    .text.DataLogger_Address:00000000 DataLogger_Address
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:126    .text.DataLogger_Address:00000008 $d
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:131    .text.DataLogger_IsEmpty:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:136    .text.DataLogger_IsEmpty:00000000 DataLogger_IsEmpty
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:192    .text.DataLogger_IsValid:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:197    .text.DataLogger_IsValid:00000000 DataLogger_IsValid
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:256    .text.DataLogger_IsValid:00000028 $d
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:261    .text.DataLogger_EraseAll:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:266    .text.DataLogger_EraseAll:00000000 DataLogger_EraseAll
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:343    .text.DataLogger_EraseAll:0000003c $d
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:349    .text.DataLogger_Init:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:355    .text.DataLogger_Init:00000000 DataLogger_Init
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:545    .text.DataLogger_Init:000000a4 $d
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:555    .text.DataLogger_Append:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:561    .text.DataLogger_Append:00000000 DataLogger_Append
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:792    .text.DataLogger_Append:000000ec $d
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:803    .text.DataLogger_Read:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:809    .text.DataLogger_Read:00000000 DataLogger_Read
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:917    .text.DataLogger_Read:00000054 $d
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:923    .text.DataLogger_GetRecordCount:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:929    .text.DataLogger_GetRecordCount:00000000 DataLogger_GetRecordCount
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:944    .text.DataLogger_GetRecordCount:00000008 $d
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:952    .bss.s_initialized:00000000 s_initialized
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:953    .bss.s_initialized:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:955    .bss.s_next_sequence:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:959    .bss.s_next_sequence:00000000 s_next_sequence
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:962    .bss.s_record_count:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:966    .bss.s_record_count:00000000 s_record_count
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:969    .bss.s_write_index:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\cc3gQdxd.s:973    .bss.s_write_index:00000000 s_write_index
 
 UNDEFINED SYMBOLS
 __data_log_start
