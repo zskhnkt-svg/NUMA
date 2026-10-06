@@ -94,17 +94,19 @@ build/app_entry.o: Core/Src/app_entry.c Core/Inc/app_common.h \
  Middlewares/ST/STM32_WPAN/ble/svc/Inc/tps.h \
  Middlewares/ST/STM32_WPAN/ble/svc/Inc/motenv_stm.h \
  Middlewares/ST/STM32_WPAN/ble/svc/Inc/p2p_stm.h \
+ Middlewares/ST/STM32_WPAN/ble/svc/Src/common_blesvc.h \
+ Middlewares/ST/STM32_WPAN/ble/ble_common.h \
+ Middlewares/ST/STM32_WPAN/interface/patterns/ble_thread/tl/tl.h \
+ Middlewares/ST/STM32_WPAN/utilities/dbg_trace.h \
  Middlewares/ST/STM32_WPAN/ble/svc/Inc/zdd_stm.h \
  Middlewares/ST/STM32_WPAN/ble/svc/Inc/otas_stm.h \
  Middlewares/ST/STM32_WPAN/ble/svc/Inc/mesh.h \
  Middlewares/ST/STM32_WPAN/ble/svc/Inc/template_stm.h \
  Middlewares/ST/STM32_WPAN/ble/svc/Inc/svc_ctl.h \
  Middlewares/ST/STM32_WPAN/ble/svc/Inc/uuid.h \
- Middlewares/ST/STM32_WPAN/interface/patterns/ble_thread/tl/tl.h \
  Utilities/sequencer/stm32_seq.h \
  Middlewares/ST/STM32_WPAN/interface/patterns/ble_thread/tl/shci_tl.h \
  Utilities/lpm/tiny_lpm/stm32_lpm.h Core/Inc/app_debug.h \
- Middlewares/ST/STM32_WPAN/utilities/dbg_trace.h \
  Middlewares/ST/STM32_WPAN/interface/patterns/ble_thread/shci/shci.h \
  Middlewares/ST/STM32_WPAN/interface/patterns/ble_thread/tl/mbox_def.h \
  Middlewares/ST/STM32_WPAN/utilities/otp.h \
@@ -213,18 +215,20 @@ Middlewares/ST/STM32_WPAN/ble/svc/Inc/lls.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/tps.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/motenv_stm.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/p2p_stm.h:
+Middlewares/ST/STM32_WPAN/ble/svc/Src/common_blesvc.h:
+Middlewares/ST/STM32_WPAN/ble/ble_common.h:
+Middlewares/ST/STM32_WPAN/interface/patterns/ble_thread/tl/tl.h:
+Middlewares/ST/STM32_WPAN/utilities/dbg_trace.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/zdd_stm.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/otas_stm.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/mesh.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/template_stm.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/svc_ctl.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/uuid.h:
-Middlewares/ST/STM32_WPAN/interface/patterns/ble_thread/tl/tl.h:
 Utilities/sequencer/stm32_seq.h:
 Middlewares/ST/STM32_WPAN/interface/patterns/ble_thread/tl/shci_tl.h:
 Utilities/lpm/tiny_lpm/stm32_lpm.h:
 Core/Inc/app_debug.h:
-Middlewares/ST/STM32_WPAN/utilities/dbg_trace.h:
 Middlewares/ST/STM32_WPAN/interface/patterns/ble_thread/shci/shci.h:
 Middlewares/ST/STM32_WPAN/interface/patterns/ble_thread/tl/mbox_def.h:
 Middlewares/ST/STM32_WPAN/utilities/otp.h:

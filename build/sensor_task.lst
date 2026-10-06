@@ -1,0 +1,2836 @@
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 1
+
+
+   1              		.cpu cortex-m4
+   2              		.arch armv7e-m
+   3              		.fpu fpv4-sp-d16
+   4              		.eabi_attribute 27, 1
+   5              		.eabi_attribute 28, 1
+   6              		.eabi_attribute 20, 1
+   7              		.eabi_attribute 21, 1
+   8              		.eabi_attribute 23, 3
+   9              		.eabi_attribute 24, 1
+  10              		.eabi_attribute 25, 1
+  11              		.eabi_attribute 26, 1
+  12              		.eabi_attribute 30, 1
+  13              		.eabi_attribute 34, 1
+  14              		.eabi_attribute 18, 4
+  15              		.file	"sensor_task.c"
+  16              		.text
+  17              	.Ltext0:
+  18              		.cfi_sections	.debug_frame
+  19              		.section	.text.Sensor_TemperatureToCenti,"ax",%progbits
+  20              		.align	1
+  21              		.syntax unified
+  22              		.thumb
+  23              		.thumb_func
+  25              	Sensor_TemperatureToCenti:
+  26              	.LVL0:
+  27              	.LFB1264:
+  28              		.file 1 "Core/Src/sensor_task.c"
+   1:Core/Src/sensor_task.c **** /**
+   2:Core/Src/sensor_task.c ****  * @file sensor_task.c
+   3:Core/Src/sensor_task.c ****  * @brief Autonomous SHT41 temperature sampling and BLE notification task.
+   4:Core/Src/sensor_task.c ****  *
+   5:Core/Src/sensor_task.c ****  * The sensor is measured every minute independently of BLE. The latest
+   6:Core/Src/sensor_task.c ****  * temperature is sent only while the phone is connected and subscribed to
+   7:Core/Src/sensor_task.c ****  * the notification characteristic.
+   8:Core/Src/sensor_task.c ****  */
+   9:Core/Src/sensor_task.c **** 
+  10:Core/Src/sensor_task.c **** #include "sensor_task.h"
+  11:Core/Src/sensor_task.c **** #include "app_ble.h"
+  12:Core/Src/sensor_task.c **** 
+  13:Core/Src/sensor_task.c **** /* STM32WB middleware and the application use the same PAUSE macro. */
+  14:Core/Src/sensor_task.c **** #ifdef PAUSE
+  15:Core/Src/sensor_task.c **** #undef PAUSE
+  16:Core/Src/sensor_task.c **** #endif
+  17:Core/Src/sensor_task.c **** #include "app_common.h"
+  18:Core/Src/sensor_task.c **** 
+  19:Core/Src/sensor_task.c **** #ifdef PAUSE
+  20:Core/Src/sensor_task.c **** #undef PAUSE
+  21:Core/Src/sensor_task.c **** #endif
+  22:Core/Src/sensor_task.c **** #include "ble.h"
+  23:Core/Src/sensor_task.c **** #include "dbg_trace.h"
+  24:Core/Src/sensor_task.c **** #include "data_logger.h"
+  25:Core/Src/sensor_task.c **** #include "hw_if.h"
+  26:Core/Src/sensor_task.c **** #include "i2c.h"
+  27:Core/Src/sensor_task.c **** #include "p2p_server_app.h"
+  28:Core/Src/sensor_task.c **** #include "p2p_stm.h"
+  29:Core/Src/sensor_task.c **** #include "rtc.h"
+  30:Core/Src/sensor_task.c **** #include "sht41.h"
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 2
+
+
+  31:Core/Src/sensor_task.c **** #include "stm32_seq.h"
+  32:Core/Src/sensor_task.c **** 
+  33:Core/Src/sensor_task.c **** #include <stdio.h>
+  34:Core/Src/sensor_task.c **** 
+  35:Core/Src/sensor_task.c **** #define SENSOR_POWER_GPIO_PORT      GPIOA
+  36:Core/Src/sensor_task.c **** #define SENSOR_POWER_PIN            GPIO_PIN_4
+  37:Core/Src/sensor_task.c **** #define SENSOR_POWER_ON_LEVEL       GPIO_PIN_RESET /* P-MOSFET: LOW = ON */
+  38:Core/Src/sensor_task.c **** #define SENSOR_POWER_OFF_LEVEL      GPIO_PIN_SET   /* P-MOSFET: HIGH = OFF */
+  39:Core/Src/sensor_task.c **** 
+  40:Core/Src/sensor_task.c **** #define SENSOR_PERIOD_MS            60000U
+  41:Core/Src/sensor_task.c **** #define SENSOR_POWER_UP_DELAY_MS    2U
+  42:Core/Src/sensor_task.c **** #define SENSOR_NOTIFY_LED_MS        15U
+  43:Core/Src/sensor_task.c **** #define LOGGER_SAMPLES_PER_RECORD   5U
+  44:Core/Src/sensor_task.c **** #define HISTORY_SEND_INTERVAL_MS    100U
+  45:Core/Src/sensor_task.c **** #define HISTORY_PAYLOAD_MAX         60U
+  46:Core/Src/sensor_task.c **** 
+  47:Core/Src/sensor_task.c **** #define SENSOR_PERIOD_TICKS \
+  48:Core/Src/sensor_task.c ****     ((SENSOR_PERIOD_MS * 1000U + (CFG_TS_TICK_VAL / 2U)) / CFG_TS_TICK_VAL)
+  49:Core/Src/sensor_task.c **** #define HISTORY_SEND_TICKS \
+  50:Core/Src/sensor_task.c ****     ((HISTORY_SEND_INTERVAL_MS * 1000U + (CFG_TS_TICK_VAL / 2U)) / CFG_TS_TICK_VAL)
+  51:Core/Src/sensor_task.c **** 
+  52:Core/Src/sensor_task.c **** extern volatile uint8_t Notification_Status;
+  53:Core/Src/sensor_task.c **** 
+  54:Core/Src/sensor_task.c **** static uint8_t s_sensor_timer_id;
+  55:Core/Src/sensor_task.c **** static uint8_t s_history_timer_id;
+  56:Core/Src/sensor_task.c **** static uint8_t s_initialized;
+  57:Core/Src/sensor_task.c **** static uint8_t s_history_active;
+  58:Core/Src/sensor_task.c **** static uint32_t s_history_index;
+  59:Core/Src/sensor_task.c **** static uint8_t s_payload_valid;
+  60:Core/Src/sensor_task.c **** static uint8_t s_payload_length;
+  61:Core/Src/sensor_task.c **** static char s_payload[16];
+  62:Core/Src/sensor_task.c **** static int32_t s_temperature_sum_x100;
+  63:Core/Src/sensor_task.c **** static int16_t s_temperature_min_x100;
+  64:Core/Src/sensor_task.c **** static int16_t s_temperature_max_x100;
+  65:Core/Src/sensor_task.c **** static uint8_t s_temperature_count;
+  66:Core/Src/sensor_task.c **** 
+  67:Core/Src/sensor_task.c **** static void Sensor_I2C_LinesToAF(void)
+  68:Core/Src/sensor_task.c **** {
+  69:Core/Src/sensor_task.c ****     GPIO_InitTypeDef gpio = {0};
+  70:Core/Src/sensor_task.c **** 
+  71:Core/Src/sensor_task.c ****     __HAL_RCC_GPIOB_CLK_ENABLE();
+  72:Core/Src/sensor_task.c **** 
+  73:Core/Src/sensor_task.c ****     gpio.Pin = GPIO_PIN_8 | GPIO_PIN_9;
+  74:Core/Src/sensor_task.c ****     gpio.Mode = GPIO_MODE_AF_OD;
+  75:Core/Src/sensor_task.c ****     gpio.Pull = GPIO_NOPULL;
+  76:Core/Src/sensor_task.c ****     gpio.Speed = GPIO_SPEED_FREQ_LOW;
+  77:Core/Src/sensor_task.c ****     gpio.Alternate = GPIO_AF4_I2C1;
+  78:Core/Src/sensor_task.c ****     HAL_GPIO_Init(GPIOB, &gpio);
+  79:Core/Src/sensor_task.c **** }
+  80:Core/Src/sensor_task.c **** 
+  81:Core/Src/sensor_task.c **** static void Sensor_PowerOn(void)
+  82:Core/Src/sensor_task.c **** {
+  83:Core/Src/sensor_task.c ****     Sensor_I2C_LinesToAF();
+  84:Core/Src/sensor_task.c **** 
+  85:Core/Src/sensor_task.c ****     HAL_GPIO_WritePin(SENSOR_POWER_GPIO_PORT,
+  86:Core/Src/sensor_task.c ****                       SENSOR_POWER_PIN,
+  87:Core/Src/sensor_task.c ****                       SENSOR_POWER_ON_LEVEL);
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 3
+
+
+  88:Core/Src/sensor_task.c **** 
+  89:Core/Src/sensor_task.c ****     HAL_Delay(SENSOR_POWER_UP_DELAY_MS);
+  90:Core/Src/sensor_task.c ****     MX_I2C1_Init();
+  91:Core/Src/sensor_task.c **** }
+  92:Core/Src/sensor_task.c **** 
+  93:Core/Src/sensor_task.c **** static void Sensor_PowerOff(void)
+  94:Core/Src/sensor_task.c **** {
+  95:Core/Src/sensor_task.c ****     GPIO_InitTypeDef gpio = {0};
+  96:Core/Src/sensor_task.c **** 
+  97:Core/Src/sensor_task.c ****     HAL_I2C_DeInit(&hi2c1);
+  98:Core/Src/sensor_task.c **** 
+  99:Core/Src/sensor_task.c ****     /* Hold I2C lines LOW to prevent back-powering the unpowered sensor. */
+ 100:Core/Src/sensor_task.c ****     __HAL_RCC_GPIOB_CLK_ENABLE();
+ 101:Core/Src/sensor_task.c ****     gpio.Pin = GPIO_PIN_8 | GPIO_PIN_9;
+ 102:Core/Src/sensor_task.c ****     gpio.Mode = GPIO_MODE_OUTPUT_PP;
+ 103:Core/Src/sensor_task.c ****     gpio.Pull = GPIO_NOPULL;
+ 104:Core/Src/sensor_task.c ****     gpio.Speed = GPIO_SPEED_FREQ_LOW;
+ 105:Core/Src/sensor_task.c ****     HAL_GPIO_Init(GPIOB, &gpio);
+ 106:Core/Src/sensor_task.c ****     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8 | GPIO_PIN_9, GPIO_PIN_RESET);
+ 107:Core/Src/sensor_task.c **** 
+ 108:Core/Src/sensor_task.c ****     HAL_GPIO_WritePin(SENSOR_POWER_GPIO_PORT,
+ 109:Core/Src/sensor_task.c ****                       SENSOR_POWER_PIN,
+ 110:Core/Src/sensor_task.c ****                       SENSOR_POWER_OFF_LEVEL);
+ 111:Core/Src/sensor_task.c **** }
+ 112:Core/Src/sensor_task.c **** 
+ 113:Core/Src/sensor_task.c **** static int16_t Sensor_TemperatureToCenti(float temperature)
+ 114:Core/Src/sensor_task.c **** {
+  29              		.loc 1 114 1 view -0
+  30              		.cfi_startproc
+  31              		@ args = 0, pretend = 0, frame = 0
+  32              		@ frame_needed = 0, uses_anonymous_args = 0
+  33              		@ link register save eliminated.
+ 115:Core/Src/sensor_task.c ****     if (temperature >= 0.0f)
+  34              		.loc 1 115 5 view .LVU1
+  35              		.loc 1 115 8 is_stmt 0 view .LVU2
+  36 0000 B5EEC00A 		vcmpe.f32	s0, #0
+  37 0004 F1EE10FA 		vmrs	APSR_nzcv, FPSCR
+  38 0008 0DDA     		bge	.L7
+ 116:Core/Src/sensor_task.c ****     {
+ 117:Core/Src/sensor_task.c ****         return (int16_t)(temperature * 100.0f + 0.5f);
+ 118:Core/Src/sensor_task.c ****     }
+ 119:Core/Src/sensor_task.c **** 
+ 120:Core/Src/sensor_task.c ****     return (int16_t)(temperature * 100.0f - 0.5f);
+  39              		.loc 1 120 5 is_stmt 1 view .LVU3
+  40              		.loc 1 120 34 is_stmt 0 view .LVU4
+  41 000a DFED0E7A 		vldr.32	s15, .L8
+  42 000e 20EE270A 		vmul.f32	s0, s0, s15
+  43              	.LVL1:
+  44              		.loc 1 120 43 view .LVU5
+  45 0012 F6EE007A 		vmov.f32	s15, #5.0e-1
+  46 0016 30EE670A 		vsub.f32	s0, s0, s15
+  47              		.loc 1 120 12 view .LVU6
+  48 001a BDEEC00A 		vcvt.s32.f32	s0, s0
+  49 001e 10EE103A 		vmov	r3, s0	@ int
+  50 0022 18B2     		sxth	r0, r3
+ 121:Core/Src/sensor_task.c **** }
+  51              		.loc 1 121 1 view .LVU7
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 4
+
+
+  52 0024 7047     		bx	lr
+  53              	.LVL2:
+  54              	.L7:
+ 117:Core/Src/sensor_task.c ****     }
+  55              		.loc 1 117 9 is_stmt 1 view .LVU8
+ 117:Core/Src/sensor_task.c ****     }
+  56              		.loc 1 117 38 is_stmt 0 view .LVU9
+  57 0026 DFED077A 		vldr.32	s15, .L8
+  58 002a 20EE270A 		vmul.f32	s0, s0, s15
+  59              	.LVL3:
+ 117:Core/Src/sensor_task.c ****     }
+  60              		.loc 1 117 47 view .LVU10
+  61 002e F6EE007A 		vmov.f32	s15, #5.0e-1
+  62 0032 30EE270A 		vadd.f32	s0, s0, s15
+ 117:Core/Src/sensor_task.c ****     }
+  63              		.loc 1 117 16 view .LVU11
+  64 0036 BDEEC00A 		vcvt.s32.f32	s0, s0
+  65 003a 10EE103A 		vmov	r3, s0	@ int
+  66 003e 18B2     		sxth	r0, r3
+  67 0040 7047     		bx	lr
+  68              	.L9:
+  69 0042 00BF     		.align	2
+  70              	.L8:
+  71 0044 0000C842 		.word	1120403456
+  72              		.cfi_endproc
+  73              	.LFE1264:
+  75              		.section	.text.HistoryTimer_Callback,"ax",%progbits
+  76              		.align	1
+  77              		.syntax unified
+  78              		.thumb
+  79              		.thumb_func
+  81              	HistoryTimer_Callback:
+  82              	.LFB1272:
+ 122:Core/Src/sensor_task.c **** 
+ 123:Core/Src/sensor_task.c **** static void Sensor_SetTemperaturePayload(int16_t temperature_centi)
+ 124:Core/Src/sensor_task.c **** {
+ 125:Core/Src/sensor_task.c ****     int32_t whole = temperature_centi / 100;
+ 126:Core/Src/sensor_task.c ****     int32_t fraction = temperature_centi % 100;
+ 127:Core/Src/sensor_task.c ****     int length;
+ 128:Core/Src/sensor_task.c **** 
+ 129:Core/Src/sensor_task.c ****     if (fraction < 0)
+ 130:Core/Src/sensor_task.c ****     {
+ 131:Core/Src/sensor_task.c ****         fraction = -fraction;
+ 132:Core/Src/sensor_task.c ****     }
+ 133:Core/Src/sensor_task.c **** 
+ 134:Core/Src/sensor_task.c ****     length = snprintf(s_payload,
+ 135:Core/Src/sensor_task.c ****                       sizeof(s_payload),
+ 136:Core/Src/sensor_task.c ****                       "T=%ld.%02ld",
+ 137:Core/Src/sensor_task.c ****                       (long)whole,
+ 138:Core/Src/sensor_task.c ****                       (long)fraction);
+ 139:Core/Src/sensor_task.c **** 
+ 140:Core/Src/sensor_task.c ****     if (length > 0 && length < (int)sizeof(s_payload))
+ 141:Core/Src/sensor_task.c ****     {
+ 142:Core/Src/sensor_task.c ****         s_payload_length = (uint8_t)length;
+ 143:Core/Src/sensor_task.c ****         s_payload_valid = 1U;
+ 144:Core/Src/sensor_task.c ****     }
+ 145:Core/Src/sensor_task.c **** }
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 5
+
+
+ 146:Core/Src/sensor_task.c **** 
+ 147:Core/Src/sensor_task.c **** static uint32_t Sensor_GetTimestamp(void)
+ 148:Core/Src/sensor_task.c **** {
+ 149:Core/Src/sensor_task.c ****     RTC_TimeTypeDef time = {0};
+ 150:Core/Src/sensor_task.c ****     RTC_DateTypeDef date = {0};
+ 151:Core/Src/sensor_task.c **** 
+ 152:Core/Src/sensor_task.c ****     HAL_RTC_GetTime(&hrtc, &time, RTC_FORMAT_BIN);
+ 153:Core/Src/sensor_task.c ****     HAL_RTC_GetDate(&hrtc, &date, RTC_FORMAT_BIN);
+ 154:Core/Src/sensor_task.c **** 
+ 155:Core/Src/sensor_task.c ****     return (((uint32_t)date.Month * 32U + date.Date) * 24U + time.Hours) * 3600U +
+ 156:Core/Src/sensor_task.c ****            (uint32_t)time.Minutes * 60U + time.Seconds;
+ 157:Core/Src/sensor_task.c **** }
+ 158:Core/Src/sensor_task.c **** 
+ 159:Core/Src/sensor_task.c **** static void Sensor_UpdateOfflineLog(int16_t temperature_centi)
+ 160:Core/Src/sensor_task.c **** {
+ 161:Core/Src/sensor_task.c ****     if (s_temperature_count == 0U)
+ 162:Core/Src/sensor_task.c ****     {
+ 163:Core/Src/sensor_task.c ****         s_temperature_min_x100 = temperature_centi;
+ 164:Core/Src/sensor_task.c ****         s_temperature_max_x100 = temperature_centi;
+ 165:Core/Src/sensor_task.c ****     }
+ 166:Core/Src/sensor_task.c ****     else
+ 167:Core/Src/sensor_task.c ****     {
+ 168:Core/Src/sensor_task.c ****         if (temperature_centi < s_temperature_min_x100)
+ 169:Core/Src/sensor_task.c ****         {
+ 170:Core/Src/sensor_task.c ****             s_temperature_min_x100 = temperature_centi;
+ 171:Core/Src/sensor_task.c ****         }
+ 172:Core/Src/sensor_task.c ****         if (temperature_centi > s_temperature_max_x100)
+ 173:Core/Src/sensor_task.c ****         {
+ 174:Core/Src/sensor_task.c ****             s_temperature_max_x100 = temperature_centi;
+ 175:Core/Src/sensor_task.c ****         }
+ 176:Core/Src/sensor_task.c ****     }
+ 177:Core/Src/sensor_task.c **** 
+ 178:Core/Src/sensor_task.c ****     s_temperature_sum_x100 += temperature_centi;
+ 179:Core/Src/sensor_task.c ****     ++s_temperature_count;
+ 180:Core/Src/sensor_task.c **** 
+ 181:Core/Src/sensor_task.c ****     if (s_temperature_count >= LOGGER_SAMPLES_PER_RECORD)
+ 182:Core/Src/sensor_task.c ****     {
+ 183:Core/Src/sensor_task.c ****         int16_t average = (int16_t)(s_temperature_sum_x100 /
+ 184:Core/Src/sensor_task.c ****                                     (int32_t)s_temperature_count);
+ 185:Core/Src/sensor_task.c **** 
+ 186:Core/Src/sensor_task.c ****         /* Always keep a five-minute backup, even while BLE is connected. */
+ 187:Core/Src/sensor_task.c ****         (void)DataLogger_Append(Sensor_GetTimestamp(),
+ 188:Core/Src/sensor_task.c ****                                 average,
+ 189:Core/Src/sensor_task.c ****                                 s_temperature_min_x100,
+ 190:Core/Src/sensor_task.c ****                                 s_temperature_max_x100,
+ 191:Core/Src/sensor_task.c ****                                 s_temperature_count);
+ 192:Core/Src/sensor_task.c **** 
+ 193:Core/Src/sensor_task.c ****         s_temperature_sum_x100 = 0;
+ 194:Core/Src/sensor_task.c ****         s_temperature_count = 0U;
+ 195:Core/Src/sensor_task.c ****     }
+ 196:Core/Src/sensor_task.c **** }
+ 197:Core/Src/sensor_task.c **** 
+ 198:Core/Src/sensor_task.c **** static void Sensor_CentiToText(int16_t value, char *text, size_t text_size)
+ 199:Core/Src/sensor_task.c **** {
+ 200:Core/Src/sensor_task.c ****     int32_t whole = value / 100;
+ 201:Core/Src/sensor_task.c ****     int32_t fraction = value % 100;
+ 202:Core/Src/sensor_task.c **** 
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 6
+
+
+ 203:Core/Src/sensor_task.c ****     if (fraction < 0)
+ 204:Core/Src/sensor_task.c ****     {
+ 205:Core/Src/sensor_task.c ****         fraction = -fraction;
+ 206:Core/Src/sensor_task.c ****     }
+ 207:Core/Src/sensor_task.c **** 
+ 208:Core/Src/sensor_task.c ****     (void)snprintf(text, text_size, "%ld.%02ld", (long)whole, (long)fraction);
+ 209:Core/Src/sensor_task.c **** }
+ 210:Core/Src/sensor_task.c **** 
+ 211:Core/Src/sensor_task.c **** static uint8_t Sensor_SendHistoryRecord(void)
+ 212:Core/Src/sensor_task.c **** {
+ 213:Core/Src/sensor_task.c ****     DataLogger_Record_t record;
+ 214:Core/Src/sensor_task.c ****     char average[12];
+ 215:Core/Src/sensor_task.c ****     char minimum[12];
+ 216:Core/Src/sensor_task.c ****     char maximum[12];
+ 217:Core/Src/sensor_task.c ****     char payload[64];
+ 218:Core/Src/sensor_task.c ****     int length;
+ 219:Core/Src/sensor_task.c ****     tBleStatus status;
+ 220:Core/Src/sensor_task.c **** 
+ 221:Core/Src/sensor_task.c ****     if (!s_history_active || !Notification_Status)
+ 222:Core/Src/sensor_task.c ****     {
+ 223:Core/Src/sensor_task.c ****         s_history_active = 0U;
+ 224:Core/Src/sensor_task.c ****         return 0U;
+ 225:Core/Src/sensor_task.c ****     }
+ 226:Core/Src/sensor_task.c **** 
+ 227:Core/Src/sensor_task.c ****     if (s_history_index >= DataLogger_GetRecordCount())
+ 228:Core/Src/sensor_task.c ****     {
+ 229:Core/Src/sensor_task.c ****         s_history_active = 0U;
+ 230:Core/Src/sensor_task.c ****         return 0U;
+ 231:Core/Src/sensor_task.c ****     }
+ 232:Core/Src/sensor_task.c **** 
+ 233:Core/Src/sensor_task.c ****     if (DataLogger_Read(s_history_index, &record) != HAL_OK)
+ 234:Core/Src/sensor_task.c ****     {
+ 235:Core/Src/sensor_task.c ****         s_history_active = 0U;
+ 236:Core/Src/sensor_task.c ****         return 0U;
+ 237:Core/Src/sensor_task.c ****     }
+ 238:Core/Src/sensor_task.c **** 
+ 239:Core/Src/sensor_task.c ****     Sensor_CentiToText(record.average_x100, average, sizeof(average));
+ 240:Core/Src/sensor_task.c ****     Sensor_CentiToText(record.minimum_x100, minimum, sizeof(minimum));
+ 241:Core/Src/sensor_task.c ****     Sensor_CentiToText(record.maximum_x100, maximum, sizeof(maximum));
+ 242:Core/Src/sensor_task.c **** 
+ 243:Core/Src/sensor_task.c ****     length = snprintf(payload,
+ 244:Core/Src/sensor_task.c ****                       sizeof(payload),
+ 245:Core/Src/sensor_task.c ****                       "H,%lu,%lu,%s,%s,%s,%u",
+ 246:Core/Src/sensor_task.c ****                       (unsigned long)record.sequence,
+ 247:Core/Src/sensor_task.c ****                       (unsigned long)record.timestamp_seconds,
+ 248:Core/Src/sensor_task.c ****                       average,
+ 249:Core/Src/sensor_task.c ****                       minimum,
+ 250:Core/Src/sensor_task.c ****                       maximum,
+ 251:Core/Src/sensor_task.c ****                       record.sample_count);
+ 252:Core/Src/sensor_task.c **** 
+ 253:Core/Src/sensor_task.c ****     if (length <= 0 || length > (int)HISTORY_PAYLOAD_MAX ||
+ 254:Core/Src/sensor_task.c ****         length >= (int)sizeof(payload))
+ 255:Core/Src/sensor_task.c ****     {
+ 256:Core/Src/sensor_task.c ****         s_history_active = 0U;
+ 257:Core/Src/sensor_task.c ****         return 0U;
+ 258:Core/Src/sensor_task.c ****     }
+ 259:Core/Src/sensor_task.c **** 
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 7
+
+
+ 260:Core/Src/sensor_task.c ****     status = P2PS_STM_App_Update_Char(P2P_NOTIFY_CHAR_UUID,
+ 261:Core/Src/sensor_task.c ****                                       (uint8_t *)payload,
+ 262:Core/Src/sensor_task.c ****                                       (uint8_t)length);
+ 263:Core/Src/sensor_task.c **** 
+ 264:Core/Src/sensor_task.c ****     if (status == BLE_STATUS_SUCCESS)
+ 265:Core/Src/sensor_task.c ****     {
+ 266:Core/Src/sensor_task.c ****         ++s_history_index;
+ 267:Core/Src/sensor_task.c ****         HW_TS_Start(s_history_timer_id, HISTORY_SEND_TICKS);
+ 268:Core/Src/sensor_task.c ****     }
+ 269:Core/Src/sensor_task.c **** 
+ 270:Core/Src/sensor_task.c ****     return 1U;
+ 271:Core/Src/sensor_task.c **** }
+ 272:Core/Src/sensor_task.c **** 
+ 273:Core/Src/sensor_task.c **** static void Sensor_SendTemperature(void)
+ 274:Core/Src/sensor_task.c **** {
+ 275:Core/Src/sensor_task.c ****     tBleStatus status;
+ 276:Core/Src/sensor_task.c **** 
+ 277:Core/Src/sensor_task.c ****     if (!s_payload_valid || !Notification_Status)
+ 278:Core/Src/sensor_task.c ****     {
+ 279:Core/Src/sensor_task.c ****         return;
+ 280:Core/Src/sensor_task.c ****     }
+ 281:Core/Src/sensor_task.c **** 
+ 282:Core/Src/sensor_task.c ****     status = P2PS_STM_App_Update_Char(P2P_NOTIFY_CHAR_UUID,
+ 283:Core/Src/sensor_task.c ****                                       (uint8_t *)s_payload,
+ 284:Core/Src/sensor_task.c ****                                       s_payload_length);
+ 285:Core/Src/sensor_task.c **** 
+ 286:Core/Src/sensor_task.c ****     if (status == BLE_STATUS_SUCCESS)
+ 287:Core/Src/sensor_task.c ****     {
+ 288:Core/Src/sensor_task.c ****         s_payload_valid = 0U;
+ 289:Core/Src/sensor_task.c ****         APP_BLE_Led_Blink(SENSOR_NOTIFY_LED_MS);
+ 290:Core/Src/sensor_task.c ****     }
+ 291:Core/Src/sensor_task.c ****     else
+ 292:Core/Src/sensor_task.c ****     {
+ 293:Core/Src/sensor_task.c ****         APP_DBG_MSG("BLE temperature notification failed: 0x%02X\r\n",
+ 294:Core/Src/sensor_task.c ****                     status);
+ 295:Core/Src/sensor_task.c ****     }
+ 296:Core/Src/sensor_task.c **** }
+ 297:Core/Src/sensor_task.c **** 
+ 298:Core/Src/sensor_task.c **** static void SensorTask_Execute(void)
+ 299:Core/Src/sensor_task.c **** {
+ 300:Core/Src/sensor_task.c ****     SHT41_Data_t data;
+ 301:Core/Src/sensor_task.c **** 
+ 302:Core/Src/sensor_task.c ****     if (s_history_active)
+ 303:Core/Src/sensor_task.c ****     {
+ 304:Core/Src/sensor_task.c ****         if (Sensor_SendHistoryRecord())
+ 305:Core/Src/sensor_task.c ****         {
+ 306:Core/Src/sensor_task.c ****             return;
+ 307:Core/Src/sensor_task.c ****         }
+ 308:Core/Src/sensor_task.c ****     }
+ 309:Core/Src/sensor_task.c **** 
+ 310:Core/Src/sensor_task.c ****     HAL_StatusTypeDef status;
+ 311:Core/Src/sensor_task.c **** 
+ 312:Core/Src/sensor_task.c ****     Sensor_PowerOn();
+ 313:Core/Src/sensor_task.c **** 
+ 314:Core/Src/sensor_task.c ****     status = SHT41_Init(&hi2c1);
+ 315:Core/Src/sensor_task.c ****     if (status != HAL_OK)
+ 316:Core/Src/sensor_task.c ****     {
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 8
+
+
+ 317:Core/Src/sensor_task.c ****         Sensor_PowerOff();
+ 318:Core/Src/sensor_task.c ****         APP_DBG_MSG("SHT41 reset failed: %d\r\n", (int)status);
+ 319:Core/Src/sensor_task.c ****         return;
+ 320:Core/Src/sensor_task.c ****     }
+ 321:Core/Src/sensor_task.c **** 
+ 322:Core/Src/sensor_task.c ****     status = SHT41_Read(&hi2c1, &data);
+ 323:Core/Src/sensor_task.c ****     Sensor_PowerOff();
+ 324:Core/Src/sensor_task.c **** 
+ 325:Core/Src/sensor_task.c ****     if (status != HAL_OK)
+ 326:Core/Src/sensor_task.c ****     {
+ 327:Core/Src/sensor_task.c ****         APP_DBG_MSG("SHT41 read failed: %d\r\n", (int)status);
+ 328:Core/Src/sensor_task.c ****         return;
+ 329:Core/Src/sensor_task.c ****     }
+ 330:Core/Src/sensor_task.c **** 
+ 331:Core/Src/sensor_task.c ****     int16_t temperature_centi = Sensor_TemperatureToCenti(data.temperature);
+ 332:Core/Src/sensor_task.c **** 
+ 333:Core/Src/sensor_task.c ****     Sensor_UpdateOfflineLog(temperature_centi);
+ 334:Core/Src/sensor_task.c ****     Sensor_SetTemperaturePayload(temperature_centi);
+ 335:Core/Src/sensor_task.c ****     Sensor_SendTemperature();
+ 336:Core/Src/sensor_task.c **** }
+ 337:Core/Src/sensor_task.c **** 
+ 338:Core/Src/sensor_task.c **** static void HistoryTimer_Callback(void)
+ 339:Core/Src/sensor_task.c **** {
+  83              		.loc 1 339 1 is_stmt 1 view -0
+  84              		.cfi_startproc
+  85              		@ args = 0, pretend = 0, frame = 0
+  86              		@ frame_needed = 0, uses_anonymous_args = 0
+  87 0000 08B5     		push	{r3, lr}
+  88              	.LCFI0:
+  89              		.cfi_def_cfa_offset 8
+  90              		.cfi_offset 3, -8
+  91              		.cfi_offset 14, -4
+ 340:Core/Src/sensor_task.c ****     UTIL_SEQ_SetTask(1U << CFG_TASK_SENSOR_MEASURE_ID,
+  92              		.loc 1 340 5 view .LVU13
+  93 0002 0021     		movs	r1, #0
+  94 0004 0420     		movs	r0, #4
+  95 0006 FFF7FEFF 		bl	UTIL_SEQ_SetTask
+  96              	.LVL4:
+ 341:Core/Src/sensor_task.c ****                      CFG_SCH_PRIO_0);
+ 342:Core/Src/sensor_task.c **** }
+  97              		.loc 1 342 1 is_stmt 0 view .LVU14
+  98 000a 08BD     		pop	{r3, pc}
+  99              		.cfi_endproc
+ 100              	.LFE1272:
+ 102              		.section	.text.SensorTimer_Callback,"ax",%progbits
+ 103              		.align	1
+ 104              		.syntax unified
+ 105              		.thumb
+ 106              		.thumb_func
+ 108              	SensorTimer_Callback:
+ 109              	.LFB1273:
+ 343:Core/Src/sensor_task.c **** 
+ 344:Core/Src/sensor_task.c **** static void SensorTimer_Callback(void)
+ 345:Core/Src/sensor_task.c **** {
+ 110              		.loc 1 345 1 is_stmt 1 view -0
+ 111              		.cfi_startproc
+ 112              		@ args = 0, pretend = 0, frame = 0
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 9
+
+
+ 113              		@ frame_needed = 0, uses_anonymous_args = 0
+ 114 0000 08B5     		push	{r3, lr}
+ 115              	.LCFI1:
+ 116              		.cfi_def_cfa_offset 8
+ 117              		.cfi_offset 3, -8
+ 118              		.cfi_offset 14, -4
+ 346:Core/Src/sensor_task.c ****     UTIL_SEQ_SetTask(1U << CFG_TASK_SENSOR_MEASURE_ID,
+ 119              		.loc 1 346 5 view .LVU16
+ 120 0002 0021     		movs	r1, #0
+ 121 0004 0420     		movs	r0, #4
+ 122 0006 FFF7FEFF 		bl	UTIL_SEQ_SetTask
+ 123              	.LVL5:
+ 347:Core/Src/sensor_task.c ****                      CFG_SCH_PRIO_0);
+ 348:Core/Src/sensor_task.c **** }
+ 124              		.loc 1 348 1 is_stmt 0 view .LVU17
+ 125 000a 08BD     		pop	{r3, pc}
+ 126              		.cfi_endproc
+ 127              	.LFE1273:
+ 129              		.section	.rodata.Sensor_CentiToText.str1.4,"aMS",%progbits,1
+ 130              		.align	2
+ 131              	.LC0:
+ 132 0000 256C642E 		.ascii	"%ld.%02ld\000"
+ 132      2530326C 
+ 132      6400
+ 133              		.section	.text.Sensor_CentiToText,"ax",%progbits
+ 134              		.align	1
+ 135              		.syntax unified
+ 136              		.thumb
+ 137              		.thumb_func
+ 139              	Sensor_CentiToText:
+ 140              	.LVL6:
+ 141              	.LFB1268:
+ 199:Core/Src/sensor_task.c ****     int32_t whole = value / 100;
+ 142              		.loc 1 199 1 is_stmt 1 view -0
+ 143              		.cfi_startproc
+ 144              		@ args = 0, pretend = 0, frame = 0
+ 145              		@ frame_needed = 0, uses_anonymous_args = 0
+ 199:Core/Src/sensor_task.c ****     int32_t whole = value / 100;
+ 146              		.loc 1 199 1 is_stmt 0 view .LVU19
+ 147 0000 10B5     		push	{r4, lr}
+ 148              	.LCFI2:
+ 149              		.cfi_def_cfa_offset 8
+ 150              		.cfi_offset 4, -8
+ 151              		.cfi_offset 14, -4
+ 152 0002 82B0     		sub	sp, sp, #8
+ 153              	.LCFI3:
+ 154              		.cfi_def_cfa_offset 16
+ 155 0004 8446     		mov	ip, r0
+ 156 0006 0846     		mov	r0, r1
+ 157              	.LVL7:
+ 199:Core/Src/sensor_task.c ****     int32_t whole = value / 100;
+ 158              		.loc 1 199 1 view .LVU20
+ 159 0008 1146     		mov	r1, r2
+ 160              	.LVL8:
+ 200:Core/Src/sensor_task.c ****     int32_t fraction = value % 100;
+ 161              		.loc 1 200 5 is_stmt 1 view .LVU21
+ 200:Core/Src/sensor_task.c ****     int32_t fraction = value % 100;
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 10
+
+
+ 162              		.loc 1 200 27 is_stmt 0 view .LVU22
+ 163 000a 0B4B     		ldr	r3, .L18
+ 164 000c 83FB0C23 		smull	r2, r3, r3, ip
+ 165              	.LVL9:
+ 200:Core/Src/sensor_task.c ****     int32_t fraction = value % 100;
+ 166              		.loc 1 200 27 view .LVU23
+ 167 0010 4FEAEC74 		asr	r4, ip, #31
+ 168 0014 C4EB6314 		rsb	r4, r4, r3, asr #5
+ 169 0018 23B2     		sxth	r3, r4
+ 170              	.LVL10:
+ 201:Core/Src/sensor_task.c **** 
+ 171              		.loc 1 201 5 is_stmt 1 view .LVU24
+ 201:Core/Src/sensor_task.c **** 
+ 172              		.loc 1 201 30 is_stmt 0 view .LVU25
+ 173 001a 6422     		movs	r2, #100
+ 174 001c 02FB14CC 		mls	ip, r2, r4, ip
+ 175 0020 0FFA8CF4 		sxth	r4, ip
+ 176              	.LVL11:
+ 203:Core/Src/sensor_task.c ****     {
+ 177              		.loc 1 203 5 is_stmt 1 view .LVU26
+ 203:Core/Src/sensor_task.c ****     {
+ 178              		.loc 1 203 8 is_stmt 0 view .LVU27
+ 179 0024 002C     		cmp	r4, #0
+ 180 0026 05DB     		blt	.L17
+ 181              	.L15:
+ 208:Core/Src/sensor_task.c **** }
+ 182              		.loc 1 208 5 is_stmt 1 view .LVU28
+ 208:Core/Src/sensor_task.c **** }
+ 183              		.loc 1 208 11 is_stmt 0 view .LVU29
+ 184 0028 0094     		str	r4, [sp]
+ 185 002a 044A     		ldr	r2, .L18+4
+ 186 002c FFF7FEFF 		bl	snprintf
+ 187              	.LVL12:
+ 209:Core/Src/sensor_task.c **** 
+ 188              		.loc 1 209 1 view .LVU30
+ 189 0030 02B0     		add	sp, sp, #8
+ 190              	.LCFI4:
+ 191              		.cfi_remember_state
+ 192              		.cfi_def_cfa_offset 8
+ 193              		@ sp needed
+ 194 0032 10BD     		pop	{r4, pc}
+ 195              	.LVL13:
+ 196              	.L17:
+ 197              	.LCFI5:
+ 198              		.cfi_restore_state
+ 205:Core/Src/sensor_task.c ****     }
+ 199              		.loc 1 205 9 is_stmt 1 view .LVU31
+ 205:Core/Src/sensor_task.c ****     }
+ 200              		.loc 1 205 18 is_stmt 0 view .LVU32
+ 201 0034 6442     		rsbs	r4, r4, #0
+ 202              	.LVL14:
+ 205:Core/Src/sensor_task.c ****     }
+ 203              		.loc 1 205 18 view .LVU33
+ 204 0036 F7E7     		b	.L15
+ 205              	.L19:
+ 206              		.align	2
+ 207              	.L18:
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 11
+
+
+ 208 0038 1F85EB51 		.word	1374389535
+ 209 003c 00000000 		.word	.LC0
+ 210              		.cfi_endproc
+ 211              	.LFE1268:
+ 213              		.section	.rodata.Sensor_SetTemperaturePayload.str1.4,"aMS",%progbits,1
+ 214              		.align	2
+ 215              	.LC1:
+ 216 0000 543D256C 		.ascii	"T=%ld.%02ld\000"
+ 216      642E2530 
+ 216      326C6400 
+ 217              		.section	.text.Sensor_SetTemperaturePayload,"ax",%progbits
+ 218              		.align	1
+ 219              		.syntax unified
+ 220              		.thumb
+ 221              		.thumb_func
+ 223              	Sensor_SetTemperaturePayload:
+ 224              	.LVL15:
+ 225              	.LFB1265:
+ 124:Core/Src/sensor_task.c ****     int32_t whole = temperature_centi / 100;
+ 226              		.loc 1 124 1 is_stmt 1 view -0
+ 227              		.cfi_startproc
+ 228              		@ args = 0, pretend = 0, frame = 0
+ 229              		@ frame_needed = 0, uses_anonymous_args = 0
+ 124:Core/Src/sensor_task.c ****     int32_t whole = temperature_centi / 100;
+ 230              		.loc 1 124 1 is_stmt 0 view .LVU35
+ 231 0000 00B5     		push	{lr}
+ 232              	.LCFI6:
+ 233              		.cfi_def_cfa_offset 4
+ 234              		.cfi_offset 14, -4
+ 235 0002 83B0     		sub	sp, sp, #12
+ 236              	.LCFI7:
+ 237              		.cfi_def_cfa_offset 16
+ 125:Core/Src/sensor_task.c ****     int32_t fraction = temperature_centi % 100;
+ 238              		.loc 1 125 5 is_stmt 1 view .LVU36
+ 125:Core/Src/sensor_task.c ****     int32_t fraction = temperature_centi % 100;
+ 239              		.loc 1 125 39 is_stmt 0 view .LVU37
+ 240 0004 0F4B     		ldr	r3, .L25
+ 241 0006 83FB0023 		smull	r2, r3, r3, r0
+ 242 000a C217     		asrs	r2, r0, #31
+ 243 000c C2EB6312 		rsb	r2, r2, r3, asr #5
+ 244 0010 13B2     		sxth	r3, r2
+ 245              	.LVL16:
+ 126:Core/Src/sensor_task.c ****     int length;
+ 246              		.loc 1 126 5 is_stmt 1 view .LVU38
+ 126:Core/Src/sensor_task.c ****     int length;
+ 247              		.loc 1 126 42 is_stmt 0 view .LVU39
+ 248 0012 6421     		movs	r1, #100
+ 249 0014 01FB1200 		mls	r0, r1, r2, r0
+ 250              	.LVL17:
+ 126:Core/Src/sensor_task.c ****     int length;
+ 251              		.loc 1 126 42 view .LVU40
+ 252 0018 00B2     		sxth	r0, r0
+ 253              	.LVL18:
+ 127:Core/Src/sensor_task.c **** 
+ 254              		.loc 1 127 5 is_stmt 1 view .LVU41
+ 129:Core/Src/sensor_task.c ****     {
+ 255              		.loc 1 129 5 view .LVU42
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 12
+
+
+ 129:Core/Src/sensor_task.c ****     {
+ 256              		.loc 1 129 8 is_stmt 0 view .LVU43
+ 257 001a 0028     		cmp	r0, #0
+ 258 001c 10DB     		blt	.L24
+ 259              	.L21:
+ 134:Core/Src/sensor_task.c ****                       sizeof(s_payload),
+ 260              		.loc 1 134 5 is_stmt 1 view .LVU44
+ 134:Core/Src/sensor_task.c ****                       sizeof(s_payload),
+ 261              		.loc 1 134 14 is_stmt 0 view .LVU45
+ 262 001e 0090     		str	r0, [sp]
+ 263 0020 094A     		ldr	r2, .L25+4
+ 264 0022 1021     		movs	r1, #16
+ 265 0024 0948     		ldr	r0, .L25+8
+ 266              	.LVL19:
+ 134:Core/Src/sensor_task.c ****                       sizeof(s_payload),
+ 267              		.loc 1 134 14 view .LVU46
+ 268 0026 FFF7FEFF 		bl	snprintf
+ 269              	.LVL20:
+ 140:Core/Src/sensor_task.c ****     {
+ 270              		.loc 1 140 5 is_stmt 1 view .LVU47
+ 140:Core/Src/sensor_task.c ****     {
+ 271              		.loc 1 140 20 is_stmt 0 view .LVU48
+ 272 002a 431E     		subs	r3, r0, #1
+ 140:Core/Src/sensor_task.c ****     {
+ 273              		.loc 1 140 8 view .LVU49
+ 274 002c 0E2B     		cmp	r3, #14
+ 275 002e 04D8     		bhi	.L20
+ 142:Core/Src/sensor_task.c ****         s_payload_valid = 1U;
+ 276              		.loc 1 142 9 is_stmt 1 view .LVU50
+ 142:Core/Src/sensor_task.c ****         s_payload_valid = 1U;
+ 277              		.loc 1 142 26 is_stmt 0 view .LVU51
+ 278 0030 074B     		ldr	r3, .L25+12
+ 279 0032 1870     		strb	r0, [r3]
+ 143:Core/Src/sensor_task.c ****     }
+ 280              		.loc 1 143 9 is_stmt 1 view .LVU52
+ 143:Core/Src/sensor_task.c ****     }
+ 281              		.loc 1 143 25 is_stmt 0 view .LVU53
+ 282 0034 074B     		ldr	r3, .L25+16
+ 283 0036 0122     		movs	r2, #1
+ 284 0038 1A70     		strb	r2, [r3]
+ 285              	.L20:
+ 145:Core/Src/sensor_task.c **** 
+ 286              		.loc 1 145 1 view .LVU54
+ 287 003a 03B0     		add	sp, sp, #12
+ 288              	.LCFI8:
+ 289              		.cfi_remember_state
+ 290              		.cfi_def_cfa_offset 4
+ 291              		@ sp needed
+ 292 003c 5DF804FB 		ldr	pc, [sp], #4
+ 293              	.LVL21:
+ 294              	.L24:
+ 295              	.LCFI9:
+ 296              		.cfi_restore_state
+ 131:Core/Src/sensor_task.c ****     }
+ 297              		.loc 1 131 9 is_stmt 1 view .LVU55
+ 131:Core/Src/sensor_task.c ****     }
+ 298              		.loc 1 131 18 is_stmt 0 view .LVU56
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 13
+
+
+ 299 0040 4042     		rsbs	r0, r0, #0
+ 300              	.LVL22:
+ 131:Core/Src/sensor_task.c ****     }
+ 301              		.loc 1 131 18 view .LVU57
+ 302 0042 ECE7     		b	.L21
+ 303              	.L26:
+ 304              		.align	2
+ 305              	.L25:
+ 306 0044 1F85EB51 		.word	1374389535
+ 307 0048 00000000 		.word	.LC1
+ 308 004c 00000000 		.word	.LANCHOR0
+ 309 0050 00000000 		.word	.LANCHOR1
+ 310 0054 00000000 		.word	.LANCHOR2
+ 311              		.cfi_endproc
+ 312              	.LFE1265:
+ 314              		.section	.rodata.Sensor_SendHistoryRecord.str1.4,"aMS",%progbits,1
+ 315              		.align	2
+ 316              	.LC2:
+ 317 0000 482C256C 		.ascii	"H,%lu,%lu,%s,%s,%s,%u\000"
+ 317      752C256C 
+ 317      752C2573 
+ 317      2C25732C 
+ 317      25732C25 
+ 318              		.section	.text.Sensor_SendHistoryRecord,"ax",%progbits
+ 319              		.align	1
+ 320              		.syntax unified
+ 321              		.thumb
+ 322              		.thumb_func
+ 324              	Sensor_SendHistoryRecord:
+ 325              	.LFB1269:
+ 212:Core/Src/sensor_task.c ****     DataLogger_Record_t record;
+ 326              		.loc 1 212 1 is_stmt 1 view -0
+ 327              		.cfi_startproc
+ 328              		@ args = 0, pretend = 0, frame = 120
+ 329              		@ frame_needed = 0, uses_anonymous_args = 0
+ 330 0000 F0B5     		push	{r4, r5, r6, r7, lr}
+ 331              	.LCFI10:
+ 332              		.cfi_def_cfa_offset 20
+ 333              		.cfi_offset 4, -20
+ 334              		.cfi_offset 5, -16
+ 335              		.cfi_offset 6, -12
+ 336              		.cfi_offset 7, -8
+ 337              		.cfi_offset 14, -4
+ 338 0002 A5B0     		sub	sp, sp, #148
+ 339              	.LCFI11:
+ 340              		.cfi_def_cfa_offset 168
+ 213:Core/Src/sensor_task.c ****     char average[12];
+ 341              		.loc 1 213 5 view .LVU59
+ 214:Core/Src/sensor_task.c ****     char minimum[12];
+ 342              		.loc 1 214 5 view .LVU60
+ 215:Core/Src/sensor_task.c ****     char maximum[12];
+ 343              		.loc 1 215 5 view .LVU61
+ 216:Core/Src/sensor_task.c ****     char payload[64];
+ 344              		.loc 1 216 5 view .LVU62
+ 217:Core/Src/sensor_task.c ****     int length;
+ 345              		.loc 1 217 5 view .LVU63
+ 218:Core/Src/sensor_task.c ****     tBleStatus status;
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 14
+
+
+ 346              		.loc 1 218 5 view .LVU64
+ 219:Core/Src/sensor_task.c **** 
+ 347              		.loc 1 219 5 view .LVU65
+ 221:Core/Src/sensor_task.c ****     {
+ 348              		.loc 1 221 5 view .LVU66
+ 221:Core/Src/sensor_task.c ****     {
+ 349              		.loc 1 221 9 is_stmt 0 view .LVU67
+ 350 0004 2E4B     		ldr	r3, .L37
+ 351 0006 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 221:Core/Src/sensor_task.c ****     {
+ 352              		.loc 1 221 8 view .LVU68
+ 353 0008 13B1     		cbz	r3, .L28
+ 221:Core/Src/sensor_task.c ****     {
+ 354              		.loc 1 221 30 discriminator 1 view .LVU69
+ 355 000a 2E4B     		ldr	r3, .L37+4
+ 356 000c 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 221:Core/Src/sensor_task.c ****     {
+ 357              		.loc 1 221 27 discriminator 1 view .LVU70
+ 358 000e 2BB9     		cbnz	r3, .L29
+ 359              	.L28:
+ 223:Core/Src/sensor_task.c ****         return 0U;
+ 360              		.loc 1 223 9 is_stmt 1 view .LVU71
+ 223:Core/Src/sensor_task.c ****         return 0U;
+ 361              		.loc 1 223 26 is_stmt 0 view .LVU72
+ 362 0010 0024     		movs	r4, #0
+ 363 0012 2B4B     		ldr	r3, .L37
+ 364 0014 1C70     		strb	r4, [r3]
+ 224:Core/Src/sensor_task.c ****     }
+ 365              		.loc 1 224 9 is_stmt 1 view .LVU73
+ 366              	.L30:
+ 271:Core/Src/sensor_task.c **** 
+ 367              		.loc 1 271 1 is_stmt 0 view .LVU74
+ 368 0016 2046     		mov	r0, r4
+ 369 0018 25B0     		add	sp, sp, #148
+ 370              	.LCFI12:
+ 371              		.cfi_remember_state
+ 372              		.cfi_def_cfa_offset 20
+ 373              		@ sp needed
+ 374 001a F0BD     		pop	{r4, r5, r6, r7, pc}
+ 375              	.L29:
+ 376              	.LCFI13:
+ 377              		.cfi_restore_state
+ 227:Core/Src/sensor_task.c ****     {
+ 378              		.loc 1 227 5 is_stmt 1 view .LVU75
+ 227:Core/Src/sensor_task.c ****     {
+ 379              		.loc 1 227 28 is_stmt 0 view .LVU76
+ 380 001c FFF7FEFF 		bl	DataLogger_GetRecordCount
+ 381              	.LVL23:
+ 227:Core/Src/sensor_task.c ****     {
+ 382              		.loc 1 227 25 view .LVU77
+ 383 0020 294B     		ldr	r3, .L37+8
+ 384 0022 1B68     		ldr	r3, [r3]
+ 227:Core/Src/sensor_task.c ****     {
+ 385              		.loc 1 227 8 view .LVU78
+ 386 0024 9842     		cmp	r0, r3
+ 387 0026 03D8     		bhi	.L31
+ 229:Core/Src/sensor_task.c ****         return 0U;
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 15
+
+
+ 388              		.loc 1 229 9 is_stmt 1 view .LVU79
+ 229:Core/Src/sensor_task.c ****         return 0U;
+ 389              		.loc 1 229 26 is_stmt 0 view .LVU80
+ 390 0028 0024     		movs	r4, #0
+ 391 002a 254B     		ldr	r3, .L37
+ 392 002c 1C70     		strb	r4, [r3]
+ 230:Core/Src/sensor_task.c ****     }
+ 393              		.loc 1 230 9 is_stmt 1 view .LVU81
+ 230:Core/Src/sensor_task.c ****     }
+ 394              		.loc 1 230 16 is_stmt 0 view .LVU82
+ 395 002e F2E7     		b	.L30
+ 396              	.L31:
+ 233:Core/Src/sensor_task.c ****     {
+ 397              		.loc 1 233 5 is_stmt 1 view .LVU83
+ 233:Core/Src/sensor_task.c ****     {
+ 398              		.loc 1 233 9 is_stmt 0 view .LVU84
+ 399 0030 20A9     		add	r1, sp, #128
+ 400 0032 1846     		mov	r0, r3
+ 401 0034 FFF7FEFF 		bl	DataLogger_Read
+ 402              	.LVL24:
+ 233:Core/Src/sensor_task.c ****     {
+ 403              		.loc 1 233 8 view .LVU85
+ 404 0038 0446     		mov	r4, r0
+ 405 003a 18B1     		cbz	r0, .L32
+ 235:Core/Src/sensor_task.c ****         return 0U;
+ 406              		.loc 1 235 9 is_stmt 1 view .LVU86
+ 235:Core/Src/sensor_task.c ****         return 0U;
+ 407              		.loc 1 235 26 is_stmt 0 view .LVU87
+ 408 003c 0024     		movs	r4, #0
+ 409 003e 204B     		ldr	r3, .L37
+ 410 0040 1C70     		strb	r4, [r3]
+ 236:Core/Src/sensor_task.c ****     }
+ 411              		.loc 1 236 9 is_stmt 1 view .LVU88
+ 236:Core/Src/sensor_task.c ****     }
+ 412              		.loc 1 236 16 is_stmt 0 view .LVU89
+ 413 0042 E8E7     		b	.L30
+ 414              	.L32:
+ 239:Core/Src/sensor_task.c ****     Sensor_CentiToText(record.minimum_x100, minimum, sizeof(minimum));
+ 415              		.loc 1 239 5 is_stmt 1 view .LVU90
+ 416 0044 1DAD     		add	r5, sp, #116
+ 417 0046 0C22     		movs	r2, #12
+ 418 0048 2946     		mov	r1, r5
+ 419 004a BDF98800 		ldrsh	r0, [sp, #136]
+ 420 004e FFF7FEFF 		bl	Sensor_CentiToText
+ 421              	.LVL25:
+ 240:Core/Src/sensor_task.c ****     Sensor_CentiToText(record.maximum_x100, maximum, sizeof(maximum));
+ 422              		.loc 1 240 5 view .LVU91
+ 423 0052 1AAE     		add	r6, sp, #104
+ 424 0054 0C22     		movs	r2, #12
+ 425 0056 3146     		mov	r1, r6
+ 426 0058 BDF98A00 		ldrsh	r0, [sp, #138]
+ 427 005c FFF7FEFF 		bl	Sensor_CentiToText
+ 428              	.LVL26:
+ 241:Core/Src/sensor_task.c **** 
+ 429              		.loc 1 241 5 view .LVU92
+ 430 0060 17AF     		add	r7, sp, #92
+ 431 0062 0C22     		movs	r2, #12
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 16
+
+
+ 432 0064 3946     		mov	r1, r7
+ 433 0066 BDF98C00 		ldrsh	r0, [sp, #140]
+ 434 006a FFF7FEFF 		bl	Sensor_CentiToText
+ 435              	.LVL27:
+ 243:Core/Src/sensor_task.c ****                       sizeof(payload),
+ 436              		.loc 1 243 5 view .LVU93
+ 251:Core/Src/sensor_task.c **** 
+ 437              		.loc 1 251 29 is_stmt 0 view .LVU94
+ 438 006e BDF88E30 		ldrh	r3, [sp, #142]
+ 243:Core/Src/sensor_task.c ****                       sizeof(payload),
+ 439              		.loc 1 243 14 view .LVU95
+ 440 0072 0493     		str	r3, [sp, #16]
+ 441 0074 0397     		str	r7, [sp, #12]
+ 442 0076 0296     		str	r6, [sp, #8]
+ 443 0078 0195     		str	r5, [sp, #4]
+ 444 007a 219B     		ldr	r3, [sp, #132]
+ 445 007c 0093     		str	r3, [sp]
+ 446 007e 209B     		ldr	r3, [sp, #128]
+ 447 0080 124A     		ldr	r2, .L37+12
+ 448 0082 4021     		movs	r1, #64
+ 449 0084 07A8     		add	r0, sp, #28
+ 450 0086 FFF7FEFF 		bl	snprintf
+ 451              	.LVL28:
+ 253:Core/Src/sensor_task.c ****         length >= (int)sizeof(payload))
+ 452              		.loc 1 253 5 is_stmt 1 view .LVU96
+ 253:Core/Src/sensor_task.c ****         length >= (int)sizeof(payload))
+ 453              		.loc 1 253 58 is_stmt 0 view .LVU97
+ 454 008a 431E     		subs	r3, r0, #1
+ 253:Core/Src/sensor_task.c ****         length >= (int)sizeof(payload))
+ 455              		.loc 1 253 8 view .LVU98
+ 456 008c 3B2B     		cmp	r3, #59
+ 457 008e 03D9     		bls	.L33
+ 256:Core/Src/sensor_task.c ****         return 0U;
+ 458              		.loc 1 256 9 is_stmt 1 view .LVU99
+ 256:Core/Src/sensor_task.c ****         return 0U;
+ 459              		.loc 1 256 26 is_stmt 0 view .LVU100
+ 460 0090 0B4B     		ldr	r3, .L37
+ 461 0092 0022     		movs	r2, #0
+ 462 0094 1A70     		strb	r2, [r3]
+ 257:Core/Src/sensor_task.c ****     }
+ 463              		.loc 1 257 9 is_stmt 1 view .LVU101
+ 257:Core/Src/sensor_task.c ****     }
+ 464              		.loc 1 257 16 is_stmt 0 view .LVU102
+ 465 0096 BEE7     		b	.L30
+ 466              	.L33:
+ 260:Core/Src/sensor_task.c ****                                       (uint8_t *)payload,
+ 467              		.loc 1 260 5 is_stmt 1 view .LVU103
+ 260:Core/Src/sensor_task.c ****                                       (uint8_t *)payload,
+ 468              		.loc 1 260 14 is_stmt 0 view .LVU104
+ 469 0098 C2B2     		uxtb	r2, r0
+ 470 009a 07A9     		add	r1, sp, #28
+ 471 009c 4FF64260 		movw	r0, #65090
+ 472              	.LVL29:
+ 260:Core/Src/sensor_task.c ****                                       (uint8_t *)payload,
+ 473              		.loc 1 260 14 view .LVU105
+ 474 00a0 FFF7FEFF 		bl	P2PS_STM_App_Update_Char
+ 475              	.LVL30:
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 17
+
+
+ 264:Core/Src/sensor_task.c ****     {
+ 476              		.loc 1 264 5 is_stmt 1 view .LVU106
+ 264:Core/Src/sensor_task.c ****     {
+ 477              		.loc 1 264 8 is_stmt 0 view .LVU107
+ 478 00a4 08B1     		cbz	r0, .L36
+ 270:Core/Src/sensor_task.c **** }
+ 479              		.loc 1 270 12 view .LVU108
+ 480 00a6 0124     		movs	r4, #1
+ 481 00a8 B5E7     		b	.L30
+ 482              	.L36:
+ 266:Core/Src/sensor_task.c ****         HW_TS_Start(s_history_timer_id, HISTORY_SEND_TICKS);
+ 483              		.loc 1 266 9 is_stmt 1 view .LVU109
+ 484 00aa 074A     		ldr	r2, .L37+8
+ 485 00ac 1368     		ldr	r3, [r2]
+ 486 00ae 0133     		adds	r3, r3, #1
+ 487 00b0 1360     		str	r3, [r2]
+ 267:Core/Src/sensor_task.c ****     }
+ 488              		.loc 1 267 9 view .LVU110
+ 489 00b2 CD21     		movs	r1, #205
+ 490 00b4 064B     		ldr	r3, .L37+16
+ 491 00b6 1878     		ldrb	r0, [r3]	@ zero_extendqisi2
+ 492              	.LVL31:
+ 267:Core/Src/sensor_task.c ****     }
+ 493              		.loc 1 267 9 is_stmt 0 view .LVU111
+ 494 00b8 FFF7FEFF 		bl	HW_TS_Start
+ 495              	.LVL32:
+ 270:Core/Src/sensor_task.c **** }
+ 496              		.loc 1 270 12 view .LVU112
+ 497 00bc 0124     		movs	r4, #1
+ 498 00be AAE7     		b	.L30
+ 499              	.L38:
+ 500              		.align	2
+ 501              	.L37:
+ 502 00c0 00000000 		.word	.LANCHOR3
+ 503 00c4 00000000 		.word	Notification_Status
+ 504 00c8 00000000 		.word	.LANCHOR4
+ 505 00cc 00000000 		.word	.LC2
+ 506 00d0 00000000 		.word	.LANCHOR5
+ 507              		.cfi_endproc
+ 508              	.LFE1269:
+ 510              		.section	.text.Sensor_I2C_LinesToAF,"ax",%progbits
+ 511              		.align	1
+ 512              		.syntax unified
+ 513              		.thumb
+ 514              		.thumb_func
+ 516              	Sensor_I2C_LinesToAF:
+ 517              	.LFB1261:
+  68:Core/Src/sensor_task.c ****     GPIO_InitTypeDef gpio = {0};
+ 518              		.loc 1 68 1 is_stmt 1 view -0
+ 519              		.cfi_startproc
+ 520              		@ args = 0, pretend = 0, frame = 24
+ 521              		@ frame_needed = 0, uses_anonymous_args = 0
+ 522 0000 00B5     		push	{lr}
+ 523              	.LCFI14:
+ 524              		.cfi_def_cfa_offset 4
+ 525              		.cfi_offset 14, -4
+ 526 0002 87B0     		sub	sp, sp, #28
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 18
+
+
+ 527              	.LCFI15:
+ 528              		.cfi_def_cfa_offset 32
+  69:Core/Src/sensor_task.c **** 
+ 529              		.loc 1 69 5 view .LVU114
+  69:Core/Src/sensor_task.c **** 
+ 530              		.loc 1 69 22 is_stmt 0 view .LVU115
+ 531 0004 0023     		movs	r3, #0
+ 532 0006 0193     		str	r3, [sp, #4]
+ 533 0008 0293     		str	r3, [sp, #8]
+ 534 000a 0393     		str	r3, [sp, #12]
+ 535 000c 0493     		str	r3, [sp, #16]
+ 536 000e 0593     		str	r3, [sp, #20]
+  71:Core/Src/sensor_task.c **** 
+ 537              		.loc 1 71 5 is_stmt 1 view .LVU116
+ 538              	.LVL33:
+ 539              	.LBB6:
+ 540              	.LBI6:
+ 541              		.file 2 "Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h"
+   1:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+   2:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   ******************************************************************************
+   3:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @file    stm32wbxx_ll_bus.h
+   4:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @author  MCD Application Team
+   5:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @brief   Header file of BUS LL module.
+   6:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   ******************************************************************************
+   7:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @attention
+   8:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *
+   9:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * Copyright (c) 2019 STMicroelectronics.
+  10:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * All rights reserved.
+  11:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *
+  12:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * This software is licensed under terms that can be found in the LICENSE file
+  13:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * in the root directory of this software component.
+  14:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * If no LICENSE file comes with this software, it is provided AS-IS.
+  15:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *
+  16:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   ******************************************************************************
+  17:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   @verbatim
+  18:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****                       ##### RCC Limitations #####
+  19:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   ==============================================================================
+  20:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****     [..]
+  21:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****       A delay between an RCC peripheral clock enable and the effective peripheral
+  22:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****       enabling should be taken into account in order to manage the peripheral read/write
+  23:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****       from/to registers.
+  24:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****       (+) This delay depends on the peripheral mapping.
+  25:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****         (++) AHB & APB peripherals, 1 dummy read is necessary
+  26:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+  27:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****     [..]
+  28:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****       Workarounds:
+  29:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****       (#) For AHB & APB peripherals, a dummy read to the peripheral register has been
+  30:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****           inserted in each LL_{BUS}_GRP{x}_EnableClock() function.
+  31:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+  32:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   @endverbatim
+  33:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   ******************************************************************************
+  34:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+  35:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+  36:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /* Define to prevent recursive inclusion -------------------------------------*/
+  37:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #ifndef STM32WBxx_LL_BUS_H
+  38:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define STM32WBxx_LL_BUS_H
+  39:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 19
+
+
+  40:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #ifdef __cplusplus
+  41:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** extern "C" {
+  42:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif
+  43:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+  44:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /* Includes ------------------------------------------------------------------*/
+  45:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #include "stm32wbxx.h"
+  46:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+  47:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /** @addtogroup STM32WBxx_LL_Driver
+  48:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @{
+  49:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+  50:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+  51:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(RCC)
+  52:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+  53:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /** @defgroup BUS_LL BUS
+  54:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @{
+  55:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+  56:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+  57:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /* Private types -------------------------------------------------------------*/
+  58:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /* Private variables ---------------------------------------------------------*/
+  59:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+  60:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /* Private constants ---------------------------------------------------------*/
+  61:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+  62:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /* Private macros ------------------------------------------------------------*/
+  63:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+  64:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /* Exported types ------------------------------------------------------------*/
+  65:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+  66:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /* Exported constants --------------------------------------------------------*/
+  67:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /** @defgroup BUS_LL_Exported_Constants BUS Exported Constants
+  68:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @{
+  69:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+  70:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+  71:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /** @defgroup BUS_LL_EC_AHB1_GRP1_PERIPH  AHB1 GRP1 PERIPH
+  72:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @{
+  73:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+  74:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB1_GRP1_PERIPH_ALL            (0xFFFFFFFFU)
+  75:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+  76:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB1_GRP1_PERIPH_DMA1           RCC_AHB1ENR_DMA1EN
+  77:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(DMA2)
+  78:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB1_GRP1_PERIPH_DMA2           RCC_AHB1ENR_DMA2EN
+  79:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* DMA2 */
+  80:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB1_GRP1_PERIPH_DMAMUX1        RCC_AHB1ENR_DMAMUX1EN
+  81:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB1_GRP1_PERIPH_SRAM1          RCC_AHB1SMENR_SRAM1SMEN
+  82:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB1_GRP1_PERIPH_CRC            RCC_AHB1ENR_CRCEN
+  83:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(TSC)
+  84:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB1_GRP1_PERIPH_TSC            RCC_AHB1ENR_TSCEN
+  85:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* TSC */
+  86:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+  87:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @}
+  88:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+  89:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+  90:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /** @defgroup BUS_LL_EC_AHB2_GRP1_PERIPH  AHB2 GRP1 PERIPH
+  91:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @{
+  92:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+  93:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB2_GRP1_PERIPH_ALL            (0xFFFFFFFFU)
+  94:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+  95:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB2_GRP1_PERIPH_GPIOA          RCC_AHB2ENR_GPIOAEN
+  96:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB2_GRP1_PERIPH_GPIOB          RCC_AHB2ENR_GPIOBEN
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 20
+
+
+  97:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB2_GRP1_PERIPH_GPIOC          RCC_AHB2ENR_GPIOCEN
+  98:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(GPIOD)
+  99:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB2_GRP1_PERIPH_GPIOD          RCC_AHB2ENR_GPIODEN
+ 100:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* GPIOD */
+ 101:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB2_GRP1_PERIPH_GPIOE          RCC_AHB2ENR_GPIOEEN
+ 102:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB2_GRP1_PERIPH_GPIOH          RCC_AHB2ENR_GPIOHEN
+ 103:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(ADC_SUPPORT_5_MSPS)
+ 104:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB2_GRP1_PERIPH_ADC            RCC_AHB2ENR_ADCEN
+ 105:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* ADC_SUPPORT_5_MSPS */
+ 106:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(AES1)
+ 107:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB2_GRP1_PERIPH_AES1           RCC_AHB2ENR_AES1EN
+ 108:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* AES1 */
+ 109:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 110:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @}
+ 111:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 112:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 113:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /** @defgroup BUS_LL_EC_AHB3_GRP1_PERIPH  AHB3 GRP1 PERIPH
+ 114:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @{
+ 115:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 116:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB3_GRP1_PERIPH_ALL            (0xFFFFFFFFU)
+ 117:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(QUADSPI)
+ 118:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB3_GRP1_PERIPH_QUADSPI        RCC_AHB3ENR_QUADSPIEN
+ 119:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* QUADSPI */
+ 120:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB3_GRP1_PERIPH_PKA            RCC_AHB3ENR_PKAEN
+ 121:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB3_GRP1_PERIPH_AES2           RCC_AHB3ENR_AES2EN
+ 122:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB3_GRP1_PERIPH_RNG            RCC_AHB3ENR_RNGEN
+ 123:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB3_GRP1_PERIPH_HSEM           RCC_AHB3ENR_HSEMEN
+ 124:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB3_GRP1_PERIPH_IPCC           RCC_AHB3ENR_IPCCEN
+ 125:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB3_GRP1_PERIPH_SRAM2          RCC_AHB3SMENR_SRAM2SMEN
+ 126:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_AHB3_GRP1_PERIPH_FLASH          RCC_AHB3ENR_FLASHEN
+ 127:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 128:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @}
+ 129:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 130:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 131:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /** @defgroup BUS_LL_EC_APB1_GRP1_PERIPH  APB1 GRP1 PERIPH
+ 132:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @{
+ 133:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 134:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB1_GRP1_PERIPH_ALL            (0xFFFFFFFFU)
+ 135:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB1_GRP1_PERIPH_TIM2           RCC_APB1ENR1_TIM2EN
+ 136:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(LCD)
+ 137:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB1_GRP1_PERIPH_LCD            RCC_APB1ENR1_LCDEN
+ 138:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* LCD */
+ 139:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB1_GRP1_PERIPH_RTCAPB         RCC_APB1ENR1_RTCAPBEN
+ 140:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB1_GRP1_PERIPH_WWDG           RCC_APB1ENR1_WWDGEN
+ 141:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(SPI2)
+ 142:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB1_GRP1_PERIPH_SPI2           RCC_APB1ENR1_SPI2EN
+ 143:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* SPI2 */
+ 144:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB1_GRP1_PERIPH_I2C1           RCC_APB1ENR1_I2C1EN
+ 145:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(I2C3)
+ 146:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB1_GRP1_PERIPH_I2C3           RCC_APB1ENR1_I2C3EN
+ 147:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* I2C3 */
+ 148:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(CRS)
+ 149:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB1_GRP1_PERIPH_CRS            RCC_APB1ENR1_CRSEN
+ 150:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* CRS */
+ 151:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(USB)
+ 152:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB1_GRP1_PERIPH_USB            RCC_APB1ENR1_USBEN
+ 153:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* USB */
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 21
+
+
+ 154:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB1_GRP1_PERIPH_LPTIM1         RCC_APB1ENR1_LPTIM1EN
+ 155:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 156:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @}
+ 157:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 158:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 159:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 160:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /** @defgroup BUS_LL_EC_APB1_GRP2_PERIPH  APB1 GRP2 PERIPH
+ 161:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @{
+ 162:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 163:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB1_GRP2_PERIPH_ALL            (0xFFFFFFFFU)
+ 164:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 165:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(LPUART1)
+ 166:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB1_GRP2_PERIPH_LPUART1        RCC_APB1ENR2_LPUART1EN
+ 167:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* LPUART1 */
+ 168:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB1_GRP2_PERIPH_LPTIM2         RCC_APB1ENR2_LPTIM2EN
+ 169:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 170:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @}
+ 171:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 172:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 173:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /** @defgroup BUS_LL_EC_APB2_GRP1_PERIPH  APB2 GRP1 PERIPH
+ 174:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @{
+ 175:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 176:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB2_GRP1_PERIPH_ALL            (0xFFFFFFFFU)
+ 177:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 178:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(ADC_SUPPORT_2_5_MSPS)
+ 179:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB2_GRP1_PERIPH_ADC            RCC_APB2ENR_ADCEN
+ 180:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* ADC_SUPPORT_2_5_MSPS */
+ 181:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB2_GRP1_PERIPH_TIM1           RCC_APB2ENR_TIM1EN
+ 182:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB2_GRP1_PERIPH_SPI1           RCC_APB2ENR_SPI1EN
+ 183:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB2_GRP1_PERIPH_USART1         RCC_APB2ENR_USART1EN
+ 184:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(TIM16)
+ 185:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB2_GRP1_PERIPH_TIM16          RCC_APB2ENR_TIM16EN
+ 186:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* TIM16 */
+ 187:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(TIM17)
+ 188:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB2_GRP1_PERIPH_TIM17          RCC_APB2ENR_TIM17EN
+ 189:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* TIM17 */
+ 190:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(SAI1)
+ 191:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB2_GRP1_PERIPH_SAI1           RCC_APB2ENR_SAI1EN
+ 192:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* SAI1 */
+ 193:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 194:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @}
+ 195:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 196:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 197:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /** @defgroup BUS_LL_EC_APB3_GRP1_PERIPH  APB3 GRP1 PERIPH
+ 198:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @{
+ 199:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 200:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB3_GRP1_PERIPH_ALL            (0xFFFFFFFFU)
+ 201:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_APB3_GRP1_PERIPH_RF             RCC_APB3RSTR_RFRST
+ 202:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 203:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @}
+ 204:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 205:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 206:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 207:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /** @defgroup BUS_LL_EC_C2_AHB1_GRP1_PERIPH  C2 AHB1 GRP1 PERIPH
+ 208:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @{
+ 209:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 210:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_AHB1_GRP1_PERIPH_DMA1         RCC_C2AHB1ENR_DMA1EN
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 22
+
+
+ 211:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(DMA2)
+ 212:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_AHB1_GRP1_PERIPH_DMA2         RCC_C2AHB1ENR_DMA2EN
+ 213:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* DMA2 */
+ 214:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_AHB1_GRP1_PERIPH_DMAMUX1      RCC_C2AHB1ENR_DMAMUX1EN
+ 215:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_AHB1_GRP1_PERIPH_SRAM1        RCC_C2AHB1ENR_SRAM1EN
+ 216:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_AHB1_GRP1_PERIPH_CRC          RCC_C2AHB1ENR_CRCEN
+ 217:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(TSC)
+ 218:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_AHB1_GRP1_PERIPH_TSC          RCC_C2AHB1ENR_TSCEN
+ 219:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* TSC */
+ 220:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 221:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @}
+ 222:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 223:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 224:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 225:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /** @defgroup BUS_LL_EC_C2_AHB2_GRP1_PERIPH  C2 AHB2 GRP1 PERIPH
+ 226:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @{
+ 227:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 228:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_AHB2_GRP1_PERIPH_GPIOA        RCC_C2AHB2ENR_GPIOAEN
+ 229:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_AHB2_GRP1_PERIPH_GPIOB        RCC_C2AHB2ENR_GPIOBEN
+ 230:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_AHB2_GRP1_PERIPH_GPIOC        RCC_C2AHB2ENR_GPIOCEN
+ 231:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(GPIOD)
+ 232:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_AHB2_GRP1_PERIPH_GPIOD        RCC_C2AHB2ENR_GPIODEN
+ 233:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* GPIOD */
+ 234:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_AHB2_GRP1_PERIPH_GPIOE        RCC_C2AHB2ENR_GPIOEEN
+ 235:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_AHB2_GRP1_PERIPH_GPIOH        RCC_C2AHB2ENR_GPIOHEN
+ 236:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(ADC_SUPPORT_5_MSPS)
+ 237:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_AHB2_GRP1_PERIPH_ADC          RCC_C2AHB2ENR_ADCEN
+ 238:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* ADC_SUPPORT_5_MSPS */
+ 239:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(AES1)
+ 240:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_AHB2_GRP1_PERIPH_AES1         RCC_C2AHB2ENR_AES1EN
+ 241:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* AES1 */
+ 242:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 243:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @}
+ 244:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 245:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 246:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 247:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /** @defgroup BUS_LL_EC_C2_AHB3_GRP1_PERIPH  C2 AHB3 GRP1 PERIPH
+ 248:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @{
+ 249:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 250:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_AHB3_GRP1_PERIPH_PKA          RCC_C2AHB3ENR_PKAEN
+ 251:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_AHB3_GRP1_PERIPH_AES2         RCC_C2AHB3ENR_AES2EN
+ 252:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_AHB3_GRP1_PERIPH_RNG          RCC_C2AHB3ENR_RNGEN
+ 253:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_AHB3_GRP1_PERIPH_HSEM         RCC_C2AHB3ENR_HSEMEN
+ 254:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_AHB3_GRP1_PERIPH_IPCC         RCC_C2AHB3ENR_IPCCEN
+ 255:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_AHB3_GRP1_PERIPH_FLASH        RCC_C2AHB3ENR_FLASHEN
+ 256:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_AHB3_GRP1_PERIPH_SRAM2        RCC_C2AHB3SMENR_SRAM2SMEN
+ 257:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 258:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @}
+ 259:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 260:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 261:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 262:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /** @defgroup BUS_LL_EC_C2_APB1_GRP1_PERIPH  C2 APB1 GRP1 PERIPH
+ 263:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @{
+ 264:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 265:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_APB1_GRP1_PERIPH_TIM2         RCC_C2APB1ENR1_TIM2EN
+ 266:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(LCD)
+ 267:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_APB1_GRP1_PERIPH_LCD          RCC_C2APB1ENR1_LCDEN
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 23
+
+
+ 268:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* LCD */
+ 269:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_APB1_GRP1_PERIPH_RTCAPB       RCC_C2APB1ENR1_RTCAPBEN
+ 270:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(SPI2)
+ 271:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_APB1_GRP1_PERIPH_SPI2         RCC_C2APB1ENR1_SPI2EN
+ 272:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* SPI2 */
+ 273:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_APB1_GRP1_PERIPH_I2C1         RCC_C2APB1ENR1_I2C1EN
+ 274:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(I2C3)
+ 275:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_APB1_GRP1_PERIPH_I2C3         RCC_C2APB1ENR1_I2C3EN
+ 276:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_APB1_GRP1_PERIPH_CRS          RCC_C2APB1ENR1_CRSEN
+ 277:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_APB1_GRP1_PERIPH_USB          RCC_C2APB1ENR1_USBEN
+ 278:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* I2C3 */
+ 279:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_APB1_GRP1_PERIPH_LPTIM1       RCC_C2APB1ENR1_LPTIM1EN
+ 280:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 281:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @}
+ 282:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 283:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 284:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 285:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /** @defgroup BUS_LL_EC_C2_APB1_GRP2_PERIPH  C2 APB1 GRP2 PERIPH
+ 286:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @{
+ 287:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 288:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(LPUART1)
+ 289:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_APB1_GRP2_PERIPH_LPUART1      RCC_C2APB1ENR2_LPUART1EN
+ 290:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* LPUART1 */
+ 291:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_APB1_GRP2_PERIPH_LPTIM2       RCC_C2APB1ENR2_LPTIM2EN
+ 292:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 293:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @}
+ 294:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 295:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 296:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 297:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /** @defgroup BUS_LL_EC_C2_APB2_GRP1_PERIPH  C2 APB2 GRP1 PERIPH
+ 298:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @{
+ 299:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 300:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(ADC_SUPPORT_2_5_MSPS)
+ 301:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_APB2_GRP1_PERIPH_ADC          RCC_C2APB2ENR_ADCEN
+ 302:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* ADC_SUPPORT_5_MSPS */
+ 303:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_APB2_GRP1_PERIPH_TIM1         RCC_C2APB2ENR_TIM1EN
+ 304:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_APB2_GRP1_PERIPH_SPI1         RCC_C2APB2ENR_SPI1EN
+ 305:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_APB2_GRP1_PERIPH_USART1       RCC_C2APB2ENR_USART1EN
+ 306:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(TIM16)
+ 307:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_APB2_GRP1_PERIPH_TIM16        RCC_C2APB2ENR_TIM16EN
+ 308:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* TIM16 */
+ 309:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(TIM17)
+ 310:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_APB2_GRP1_PERIPH_TIM17        RCC_C2APB2ENR_TIM17EN
+ 311:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* TIM17 */
+ 312:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(SAI1)
+ 313:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_APB2_GRP1_PERIPH_SAI1         RCC_C2APB2ENR_SAI1EN
+ 314:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* SAI1 */
+ 315:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 316:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @}
+ 317:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 318:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 319:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 320:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /** @defgroup BUS_LL_EC_C2_APB3_GRP1_PERIPH  C2 APB3 GRP1 PERIPH
+ 321:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @{
+ 322:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 323:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_APB3_GRP1_PERIPH_BLE          RCC_C2APB3ENR_BLEEN
+ 324:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #if defined(RCC_802_SUPPORT)
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 24
+
+
+ 325:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #define LL_C2_APB3_GRP1_PERIPH_802          RCC_C2APB3ENR_802EN
+ 326:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** #endif /* RCC_802_SUPPORT */
+ 327:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 328:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @}
+ 329:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 330:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 331:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 332:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 333:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @}
+ 334:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 335:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 336:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /* Exported macro ------------------------------------------------------------*/
+ 337:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 338:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /* Exported functions --------------------------------------------------------*/
+ 339:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 340:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /** @defgroup BUS_LL_Exported_Functions BUS Exported Functions
+ 341:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @{
+ 342:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 343:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 344:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /** @defgroup BUS_LL_EF_AHB1 AHB1
+ 345:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @{
+ 346:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 347:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 348:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 349:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @brief  Enable AHB1 peripherals clock.
+ 350:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @rmtoll AHB1ENR      DMA1EN        LL_AHB1_GRP1_EnableClock\n
+ 351:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1ENR      DMA2EN        LL_AHB1_GRP1_EnableClock\n
+ 352:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1ENR      DMAMUX1EN      LL_AHB1_GRP1_EnableClock\n
+ 353:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1ENR      CRCEN         LL_AHB1_GRP1_EnableClock\n
+ 354:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1ENR      TSCEN         LL_AHB1_GRP1_EnableClock
+ 355:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @param  Periphs This parameter can be a combination of the following values:
+ 356:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_DMA1
+ 357:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_DMA2 (*)
+ 358:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_DMAMUX1
+ 359:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_CRC
+ 360:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_TSC
+ 361:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @note  (*) Not supported by all the devices
+ 362:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @retval None
+ 363:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 364:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** __STATIC_INLINE void LL_AHB1_GRP1_EnableClock(uint32_t Periphs)
+ 365:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** {
+ 366:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   __IO uint32_t tmpreg;
+ 367:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   SET_BIT(RCC->AHB1ENR, Periphs);
+ 368:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   /* Delay after an RCC peripheral clock enabling */
+ 369:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   tmpreg = READ_BIT(RCC->AHB1ENR, Periphs);
+ 370:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   (void)tmpreg;
+ 371:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** }
+ 372:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 373:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 374:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @brief  Check if AHB1 peripheral clock is enabled or not
+ 375:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @rmtoll AHB1ENR      DMA1EN        LL_AHB1_GRP1_IsEnabledClock\n
+ 376:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1ENR      DMA2EN        LL_AHB1_GRP1_IsEnabledClock\n
+ 377:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1ENR      DMAMUX1EN      LL_AHB1_GRP1_IsEnabledClock\n
+ 378:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1ENR      CRCEN         LL_AHB1_GRP1_IsEnabledClock\n
+ 379:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1ENR      TSCEN         LL_AHB1_GRP1_IsEnabledClock
+ 380:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @param  Periphs This parameter can be a combination of the following values:
+ 381:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_DMA1
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 25
+
+
+ 382:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_DMA2 (*)
+ 383:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_DMAMUX1
+ 384:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_CRC
+ 385:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_TSC
+ 386:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @note  (*) Not supported by all the devices
+ 387:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @retval uint32_t
+ 388:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 389:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** __STATIC_INLINE uint32_t LL_AHB1_GRP1_IsEnabledClock(uint32_t Periphs)
+ 390:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** {
+ 391:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   return ((READ_BIT(RCC->AHB1ENR, Periphs) == (Periphs)) ? 1UL : 0UL);
+ 392:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** }
+ 393:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 394:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 395:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @brief  Disable AHB1 peripherals clock.
+ 396:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @rmtoll AHB1ENR      DMA1EN        LL_AHB1_GRP1_DisableClock\n
+ 397:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1ENR      DMA2EN        LL_AHB1_GRP1_DisableClock\n
+ 398:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1ENR      DMAMUX1EN      LL_AHB1_GRP1_DisableClock\n
+ 399:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1ENR      CRCEN         LL_AHB1_GRP1_DisableClock\n
+ 400:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1ENR      TSCEN         LL_AHB1_GRP1_DisableClock
+ 401:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @param  Periphs This parameter can be a combination of the following values:
+ 402:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_DMA1
+ 403:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_DMA2 (*)
+ 404:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_DMAMUX1
+ 405:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_CRC
+ 406:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_TSC
+ 407:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @note  (*) Not supported by all the devices
+ 408:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @retval None
+ 409:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 410:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** __STATIC_INLINE void LL_AHB1_GRP1_DisableClock(uint32_t Periphs)
+ 411:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** {
+ 412:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   CLEAR_BIT(RCC->AHB1ENR, Periphs);
+ 413:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** }
+ 414:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 415:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 416:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @brief  Force AHB1 peripherals reset.
+ 417:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @rmtoll AHB1RSTR     DMA1RST       LL_AHB1_GRP1_ForceReset\n
+ 418:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1RSTR     DMA2RST       LL_AHB1_GRP1_ForceReset\n
+ 419:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1RSTR     DMAMUX1RST     LL_AHB1_GRP1_ForceReset\n
+ 420:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1RSTR     CRCRST        LL_AHB1_GRP1_ForceReset\n
+ 421:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1RSTR     TSCRST        LL_AHB1_GRP1_ForceReset
+ 422:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @param  Periphs This parameter can be a combination of the following values:
+ 423:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_ALL
+ 424:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_DMA1
+ 425:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_DMA2 (*)
+ 426:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_DMAMUX1
+ 427:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_CRC
+ 428:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_TSC
+ 429:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @note  (*) Not supported by all the devices
+ 430:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @retval None
+ 431:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 432:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** __STATIC_INLINE void LL_AHB1_GRP1_ForceReset(uint32_t Periphs)
+ 433:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** {
+ 434:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   SET_BIT(RCC->AHB1RSTR, Periphs);
+ 435:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** }
+ 436:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 437:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 438:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @brief  Release AHB1 peripherals reset.
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 26
+
+
+ 439:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @rmtoll AHB1RSTR     DMA1RST       LL_AHB1_GRP1_ReleaseReset\n
+ 440:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1RSTR     DMA2RST       LL_AHB1_GRP1_ReleaseReset\n
+ 441:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1RSTR     DMAMUX1RST     LL_AHB1_GRP1_ReleaseReset\n
+ 442:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1RSTR     CRCRST        LL_AHB1_GRP1_ReleaseReset\n
+ 443:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1RSTR     TSCRST        LL_AHB1_GRP1_ReleaseReset
+ 444:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @param  Periphs This parameter can be a combination of the following values:
+ 445:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_ALL
+ 446:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_DMA1
+ 447:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_DMA2 (*)
+ 448:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_DMAMUX1
+ 449:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_CRC
+ 450:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_TSC
+ 451:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @note  (*) Not supported by all the devices
+ 452:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @retval None
+ 453:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 454:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** __STATIC_INLINE void LL_AHB1_GRP1_ReleaseReset(uint32_t Periphs)
+ 455:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** {
+ 456:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   CLEAR_BIT(RCC->AHB1RSTR, Periphs);
+ 457:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** }
+ 458:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 459:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 460:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @brief  Enable AHB1 peripherals clock during Low Power (Sleep) mode.
+ 461:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @rmtoll AHB1SMENR    DMA1SMEN      LL_AHB1_GRP1_EnableClockSleep\n
+ 462:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1SMENR    DMA2SMEN      LL_AHB1_GRP1_EnableClockSleep\n
+ 463:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1SMENR    DMAMUX1SMEN    LL_AHB1_GRP1_EnableClockSleep\n
+ 464:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1SMENR    SRAM1SMEN     LL_AHB1_GRP1_EnableClockSleep\n
+ 465:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1SMENR    CRCSMEN       LL_AHB1_GRP1_EnableClockSleep\n
+ 466:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1SMENR    TSCSMEN       LL_AHB1_GRP1_EnableClockSleep
+ 467:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @param  Periphs This parameter can be a combination of the following values:
+ 468:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_DMA1
+ 469:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_DMA2 (*)
+ 470:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_DMAMUX1
+ 471:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_SRAM1
+ 472:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_CRC
+ 473:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_TSC
+ 474:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @note  (*) Not supported by all the devices
+ 475:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @retval None
+ 476:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 477:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** __STATIC_INLINE void LL_AHB1_GRP1_EnableClockSleep(uint32_t Periphs)
+ 478:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** {
+ 479:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   __IO uint32_t tmpreg;
+ 480:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   SET_BIT(RCC->AHB1SMENR, Periphs);
+ 481:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   /* Delay after an RCC peripheral clock enabling */
+ 482:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   tmpreg = READ_BIT(RCC->AHB1SMENR, Periphs);
+ 483:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   (void)tmpreg;
+ 484:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** }
+ 485:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 486:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 487:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @brief  Disable AHB1 peripherals clock during Low Power (Sleep) mode.
+ 488:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @rmtoll AHB1SMENR    DMA1SMEN      LL_AHB1_GRP1_DisableClockSleep\n
+ 489:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1SMENR    DMA2SMEN      LL_AHB1_GRP1_DisableClockSleep\n
+ 490:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1SMENR    DMAMUX1SMEN    LL_AHB1_GRP1_DisableClockSleep\n
+ 491:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1SMENR    SRAM1SMEN     LL_AHB1_GRP1_DisableClockSleep\n
+ 492:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1SMENR    CRCSMEN       LL_AHB1_GRP1_DisableClockSleep\n
+ 493:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB1SMENR    TSCSMEN       LL_AHB1_GRP1_DisableClockSleep
+ 494:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @param  Periphs This parameter can be a combination of the following values:
+ 495:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_DMA1
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 27
+
+
+ 496:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_DMA2 (*)
+ 497:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_DMAMUX1
+ 498:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_SRAM1
+ 499:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_CRC
+ 500:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB1_GRP1_PERIPH_TSC
+ 501:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @note  (*) Not supported by all the devices
+ 502:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @retval None
+ 503:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 504:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** __STATIC_INLINE void LL_AHB1_GRP1_DisableClockSleep(uint32_t Periphs)
+ 505:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** {
+ 506:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   CLEAR_BIT(RCC->AHB1SMENR, Periphs);
+ 507:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** }
+ 508:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 509:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 510:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @}
+ 511:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 512:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 513:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /** @defgroup BUS_LL_EF_AHB2 AHB2
+ 514:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @{
+ 515:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 516:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** 
+ 517:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** /**
+ 518:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @brief  Enable AHB2 peripherals clock.
+ 519:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @rmtoll AHB2ENR      GPIOAEN       LL_AHB2_GRP1_EnableClock\n
+ 520:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB2ENR      GPIOBEN       LL_AHB2_GRP1_EnableClock\n
+ 521:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB2ENR      GPIOCEN       LL_AHB2_GRP1_EnableClock\n
+ 522:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB2ENR      GPIODEN       LL_AHB2_GRP1_EnableClock\n
+ 523:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB2ENR      GPIOEEN       LL_AHB2_GRP1_EnableClock\n
+ 524:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB2ENR      GPIOHEN       LL_AHB2_GRP1_EnableClock\n
+ 525:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB2ENR      ADCEN         LL_AHB2_GRP1_EnableClock\n
+ 526:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         AHB2ENR      AES1EN        LL_AHB2_GRP1_EnableClock
+ 527:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @param  Periphs This parameter can be a combination of the following values:
+ 528:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB2_GRP1_PERIPH_GPIOA
+ 529:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB2_GRP1_PERIPH_GPIOB
+ 530:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB2_GRP1_PERIPH_GPIOC
+ 531:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB2_GRP1_PERIPH_GPIOD (*)
+ 532:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB2_GRP1_PERIPH_GPIOE
+ 533:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB2_GRP1_PERIPH_GPIOH
+ 534:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB2_GRP1_PERIPH_ADC (*)
+ 535:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   *         @arg @ref LL_AHB2_GRP1_PERIPH_AES1 (*)
+ 536:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @note  (*) Not supported by all the devices
+ 537:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   * @retval None
+ 538:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   */
+ 539:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** __STATIC_INLINE void LL_AHB2_GRP1_EnableClock(uint32_t Periphs)
+ 542              		.loc 2 539 22 view .LVU117
+ 543              	.LBB7:
+ 540:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** {
+ 541:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   __IO uint32_t tmpreg;
+ 544              		.loc 2 541 3 view .LVU118
+ 542:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   SET_BIT(RCC->AHB2ENR, Periphs);
+ 545              		.loc 2 542 3 view .LVU119
+ 546 0010 4FF0B043 		mov	r3, #1476395008
+ 547 0014 DA6C     		ldr	r2, [r3, #76]
+ 548 0016 42F00202 		orr	r2, r2, #2
+ 549 001a DA64     		str	r2, [r3, #76]
+ 543:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   /* Delay after an RCC peripheral clock enabling */
+ 544:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   tmpreg = READ_BIT(RCC->AHB2ENR, Periphs);
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 28
+
+
+ 550              		.loc 2 544 3 view .LVU120
+ 551              		.loc 2 544 12 is_stmt 0 view .LVU121
+ 552 001c DB6C     		ldr	r3, [r3, #76]
+ 553 001e 03F00203 		and	r3, r3, #2
+ 554              		.loc 2 544 10 view .LVU122
+ 555 0022 0093     		str	r3, [sp]
+ 545:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   (void)tmpreg;
+ 556              		.loc 2 545 3 is_stmt 1 view .LVU123
+ 557 0024 009B     		ldr	r3, [sp]
+ 558              	.LVL34:
+ 559              		.loc 2 545 3 is_stmt 0 view .LVU124
+ 560              	.LBE7:
+ 561              	.LBE6:
+  73:Core/Src/sensor_task.c ****     gpio.Mode = GPIO_MODE_AF_OD;
+ 562              		.loc 1 73 5 is_stmt 1 view .LVU125
+  73:Core/Src/sensor_task.c ****     gpio.Mode = GPIO_MODE_AF_OD;
+ 563              		.loc 1 73 14 is_stmt 0 view .LVU126
+ 564 0026 4FF44073 		mov	r3, #768
+ 565 002a 0193     		str	r3, [sp, #4]
+  74:Core/Src/sensor_task.c ****     gpio.Pull = GPIO_NOPULL;
+ 566              		.loc 1 74 5 is_stmt 1 view .LVU127
+  74:Core/Src/sensor_task.c ****     gpio.Pull = GPIO_NOPULL;
+ 567              		.loc 1 74 15 is_stmt 0 view .LVU128
+ 568 002c 1223     		movs	r3, #18
+ 569 002e 0293     		str	r3, [sp, #8]
+  75:Core/Src/sensor_task.c ****     gpio.Speed = GPIO_SPEED_FREQ_LOW;
+ 570              		.loc 1 75 5 is_stmt 1 view .LVU129
+  76:Core/Src/sensor_task.c ****     gpio.Alternate = GPIO_AF4_I2C1;
+ 571              		.loc 1 76 5 view .LVU130
+  77:Core/Src/sensor_task.c ****     HAL_GPIO_Init(GPIOB, &gpio);
+ 572              		.loc 1 77 5 view .LVU131
+  77:Core/Src/sensor_task.c ****     HAL_GPIO_Init(GPIOB, &gpio);
+ 573              		.loc 1 77 20 is_stmt 0 view .LVU132
+ 574 0030 0423     		movs	r3, #4
+ 575 0032 0593     		str	r3, [sp, #20]
+  78:Core/Src/sensor_task.c **** }
+ 576              		.loc 1 78 5 is_stmt 1 view .LVU133
+ 577 0034 0DEB0301 		add	r1, sp, r3
+ 578 0038 0248     		ldr	r0, .L41
+ 579 003a FFF7FEFF 		bl	HAL_GPIO_Init
+ 580              	.LVL35:
+  79:Core/Src/sensor_task.c **** 
+ 581              		.loc 1 79 1 is_stmt 0 view .LVU134
+ 582 003e 07B0     		add	sp, sp, #28
+ 583              	.LCFI16:
+ 584              		.cfi_def_cfa_offset 4
+ 585              		@ sp needed
+ 586 0040 5DF804FB 		ldr	pc, [sp], #4
+ 587              	.L42:
+ 588              		.align	2
+ 589              	.L41:
+ 590 0044 00040048 		.word	1207960576
+ 591              		.cfi_endproc
+ 592              	.LFE1261:
+ 594              		.section	.text.Sensor_PowerOn,"ax",%progbits
+ 595              		.align	1
+ 596              		.syntax unified
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 29
+
+
+ 597              		.thumb
+ 598              		.thumb_func
+ 600              	Sensor_PowerOn:
+ 601              	.LFB1262:
+  82:Core/Src/sensor_task.c ****     Sensor_I2C_LinesToAF();
+ 602              		.loc 1 82 1 is_stmt 1 view -0
+ 603              		.cfi_startproc
+ 604              		@ args = 0, pretend = 0, frame = 0
+ 605              		@ frame_needed = 0, uses_anonymous_args = 0
+ 606 0000 08B5     		push	{r3, lr}
+ 607              	.LCFI17:
+ 608              		.cfi_def_cfa_offset 8
+ 609              		.cfi_offset 3, -8
+ 610              		.cfi_offset 14, -4
+  83:Core/Src/sensor_task.c **** 
+ 611              		.loc 1 83 5 view .LVU136
+ 612 0002 FFF7FEFF 		bl	Sensor_I2C_LinesToAF
+ 613              	.LVL36:
+  85:Core/Src/sensor_task.c ****                       SENSOR_POWER_PIN,
+ 614              		.loc 1 85 5 view .LVU137
+ 615 0006 0022     		movs	r2, #0
+ 616 0008 1021     		movs	r1, #16
+ 617 000a 4FF09040 		mov	r0, #1207959552
+ 618 000e FFF7FEFF 		bl	HAL_GPIO_WritePin
+ 619              	.LVL37:
+  89:Core/Src/sensor_task.c ****     MX_I2C1_Init();
+ 620              		.loc 1 89 5 view .LVU138
+ 621 0012 0220     		movs	r0, #2
+ 622 0014 FFF7FEFF 		bl	HAL_Delay
+ 623              	.LVL38:
+  90:Core/Src/sensor_task.c **** }
+ 624              		.loc 1 90 5 view .LVU139
+ 625 0018 FFF7FEFF 		bl	MX_I2C1_Init
+ 626              	.LVL39:
+  91:Core/Src/sensor_task.c **** 
+ 627              		.loc 1 91 1 is_stmt 0 view .LVU140
+ 628 001c 08BD     		pop	{r3, pc}
+ 629              		.cfi_endproc
+ 630              	.LFE1262:
+ 632              		.section	.text.Sensor_GetTimestamp,"ax",%progbits
+ 633              		.align	1
+ 634              		.syntax unified
+ 635              		.thumb
+ 636              		.thumb_func
+ 638              	Sensor_GetTimestamp:
+ 639              	.LFB1266:
+ 148:Core/Src/sensor_task.c ****     RTC_TimeTypeDef time = {0};
+ 640              		.loc 1 148 1 is_stmt 1 view -0
+ 641              		.cfi_startproc
+ 642              		@ args = 0, pretend = 0, frame = 24
+ 643              		@ frame_needed = 0, uses_anonymous_args = 0
+ 644 0000 30B5     		push	{r4, r5, lr}
+ 645              	.LCFI18:
+ 646              		.cfi_def_cfa_offset 12
+ 647              		.cfi_offset 4, -12
+ 648              		.cfi_offset 5, -8
+ 649              		.cfi_offset 14, -4
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 30
+
+
+ 650 0002 87B0     		sub	sp, sp, #28
+ 651              	.LCFI19:
+ 652              		.cfi_def_cfa_offset 40
+ 149:Core/Src/sensor_task.c ****     RTC_DateTypeDef date = {0};
+ 653              		.loc 1 149 5 view .LVU142
+ 149:Core/Src/sensor_task.c ****     RTC_DateTypeDef date = {0};
+ 654              		.loc 1 149 21 is_stmt 0 view .LVU143
+ 655 0004 0024     		movs	r4, #0
+ 656 0006 0194     		str	r4, [sp, #4]
+ 657 0008 0294     		str	r4, [sp, #8]
+ 658 000a 0394     		str	r4, [sp, #12]
+ 659 000c 0494     		str	r4, [sp, #16]
+ 660 000e 0594     		str	r4, [sp, #20]
+ 150:Core/Src/sensor_task.c **** 
+ 661              		.loc 1 150 5 is_stmt 1 view .LVU144
+ 150:Core/Src/sensor_task.c **** 
+ 662              		.loc 1 150 21 is_stmt 0 view .LVU145
+ 663 0010 0094     		str	r4, [sp]
+ 152:Core/Src/sensor_task.c ****     HAL_RTC_GetDate(&hrtc, &date, RTC_FORMAT_BIN);
+ 664              		.loc 1 152 5 is_stmt 1 view .LVU146
+ 665 0012 124D     		ldr	r5, .L47
+ 666 0014 2246     		mov	r2, r4
+ 667 0016 01A9     		add	r1, sp, #4
+ 668 0018 2846     		mov	r0, r5
+ 669 001a FFF7FEFF 		bl	HAL_RTC_GetTime
+ 670              	.LVL40:
+ 153:Core/Src/sensor_task.c **** 
+ 671              		.loc 1 153 5 view .LVU147
+ 672 001e 2246     		mov	r2, r4
+ 673 0020 6946     		mov	r1, sp
+ 674 0022 2846     		mov	r0, r5
+ 675 0024 FFF7FEFF 		bl	HAL_RTC_GetDate
+ 676              	.LVL41:
+ 155:Core/Src/sensor_task.c ****            (uint32_t)time.Minutes * 60U + time.Seconds;
+ 677              		.loc 1 155 5 view .LVU148
+ 155:Core/Src/sensor_task.c ****            (uint32_t)time.Minutes * 60U + time.Seconds;
+ 678              		.loc 1 155 28 is_stmt 0 view .LVU149
+ 679 0028 9DF80120 		ldrb	r2, [sp, #1]	@ zero_extendqisi2
+ 155:Core/Src/sensor_task.c ****            (uint32_t)time.Minutes * 60U + time.Seconds;
+ 680              		.loc 1 155 47 view .LVU150
+ 681 002c 9DF80230 		ldrb	r3, [sp, #2]	@ zero_extendqisi2
+ 155:Core/Src/sensor_task.c ****            (uint32_t)time.Minutes * 60U + time.Seconds;
+ 682              		.loc 1 155 41 view .LVU151
+ 683 0030 03EB4213 		add	r3, r3, r2, lsl #5
+ 155:Core/Src/sensor_task.c ****            (uint32_t)time.Minutes * 60U + time.Seconds;
+ 684              		.loc 1 155 54 view .LVU152
+ 685 0034 03EB4303 		add	r3, r3, r3, lsl #1
+ 686 0038 D800     		lsls	r0, r3, #3
+ 155:Core/Src/sensor_task.c ****            (uint32_t)time.Minutes * 60U + time.Seconds;
+ 687              		.loc 1 155 66 view .LVU153
+ 688 003a 9DF80420 		ldrb	r2, [sp, #4]	@ zero_extendqisi2
+ 155:Core/Src/sensor_task.c ****            (uint32_t)time.Minutes * 60U + time.Seconds;
+ 689              		.loc 1 155 60 view .LVU154
+ 690 003e 0244     		add	r2, r2, r0
+ 156:Core/Src/sensor_task.c **** }
+ 691              		.loc 1 156 26 view .LVU155
+ 692 0040 9DF80530 		ldrb	r3, [sp, #5]	@ zero_extendqisi2
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 31
+
+
+ 156:Core/Src/sensor_task.c **** }
+ 693              		.loc 1 156 35 view .LVU156
+ 694 0044 C3EB0313 		rsb	r3, r3, r3, lsl #4
+ 695 0048 9800     		lsls	r0, r3, #2
+ 155:Core/Src/sensor_task.c ****            (uint32_t)time.Minutes * 60U + time.Seconds;
+ 696              		.loc 1 155 82 view .LVU157
+ 697 004a 4FF46163 		mov	r3, #3600
+ 698 004e 03FB0200 		mla	r0, r3, r2, r0
+ 156:Core/Src/sensor_task.c **** }
+ 699              		.loc 1 156 47 view .LVU158
+ 700 0052 9DF80630 		ldrb	r3, [sp, #6]	@ zero_extendqisi2
+ 157:Core/Src/sensor_task.c **** 
+ 701              		.loc 1 157 1 view .LVU159
+ 702 0056 1844     		add	r0, r0, r3
+ 703 0058 07B0     		add	sp, sp, #28
+ 704              	.LCFI20:
+ 705              		.cfi_def_cfa_offset 12
+ 706              		@ sp needed
+ 707 005a 30BD     		pop	{r4, r5, pc}
+ 708              	.L48:
+ 709              		.align	2
+ 710              	.L47:
+ 711 005c 00000000 		.word	hrtc
+ 712              		.cfi_endproc
+ 713              	.LFE1266:
+ 715              		.section	.text.Sensor_UpdateOfflineLog,"ax",%progbits
+ 716              		.align	1
+ 717              		.syntax unified
+ 718              		.thumb
+ 719              		.thumb_func
+ 721              	Sensor_UpdateOfflineLog:
+ 722              	.LVL42:
+ 723              	.LFB1267:
+ 160:Core/Src/sensor_task.c ****     if (s_temperature_count == 0U)
+ 724              		.loc 1 160 1 is_stmt 1 view -0
+ 725              		.cfi_startproc
+ 726              		@ args = 0, pretend = 0, frame = 0
+ 727              		@ frame_needed = 0, uses_anonymous_args = 0
+ 160:Core/Src/sensor_task.c ****     if (s_temperature_count == 0U)
+ 728              		.loc 1 160 1 is_stmt 0 view .LVU161
+ 729 0000 30B5     		push	{r4, r5, lr}
+ 730              	.LCFI21:
+ 731              		.cfi_def_cfa_offset 12
+ 732              		.cfi_offset 4, -12
+ 733              		.cfi_offset 5, -8
+ 734              		.cfi_offset 14, -4
+ 735 0002 83B0     		sub	sp, sp, #12
+ 736              	.LCFI22:
+ 737              		.cfi_def_cfa_offset 24
+ 161:Core/Src/sensor_task.c ****     {
+ 738              		.loc 1 161 5 is_stmt 1 view .LVU162
+ 161:Core/Src/sensor_task.c ****     {
+ 739              		.loc 1 161 29 is_stmt 0 view .LVU163
+ 740 0004 1B4B     		ldr	r3, .L56
+ 741 0006 1C78     		ldrb	r4, [r3]	@ zero_extendqisi2
+ 161:Core/Src/sensor_task.c ****     {
+ 742              		.loc 1 161 8 view .LVU164
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 32
+
+
+ 743 0008 7CB9     		cbnz	r4, .L50
+ 163:Core/Src/sensor_task.c ****         s_temperature_max_x100 = temperature_centi;
+ 744              		.loc 1 163 9 is_stmt 1 view .LVU165
+ 163:Core/Src/sensor_task.c ****         s_temperature_max_x100 = temperature_centi;
+ 745              		.loc 1 163 32 is_stmt 0 view .LVU166
+ 746 000a 1B4B     		ldr	r3, .L56+4
+ 747 000c 1880     		strh	r0, [r3]	@ movhi
+ 164:Core/Src/sensor_task.c ****     }
+ 748              		.loc 1 164 9 is_stmt 1 view .LVU167
+ 164:Core/Src/sensor_task.c ****     }
+ 749              		.loc 1 164 32 is_stmt 0 view .LVU168
+ 750 000e 1B4B     		ldr	r3, .L56+8
+ 751 0010 1880     		strh	r0, [r3]	@ movhi
+ 752              	.L51:
+ 178:Core/Src/sensor_task.c ****     ++s_temperature_count;
+ 753              		.loc 1 178 5 is_stmt 1 view .LVU169
+ 178:Core/Src/sensor_task.c ****     ++s_temperature_count;
+ 754              		.loc 1 178 28 is_stmt 0 view .LVU170
+ 755 0012 1B4B     		ldr	r3, .L56+12
+ 756 0014 1A68     		ldr	r2, [r3]
+ 757 0016 1044     		add	r0, r0, r2
+ 758              	.LVL43:
+ 178:Core/Src/sensor_task.c ****     ++s_temperature_count;
+ 759              		.loc 1 178 28 view .LVU171
+ 760 0018 1860     		str	r0, [r3]
+ 179:Core/Src/sensor_task.c **** 
+ 761              		.loc 1 179 5 is_stmt 1 view .LVU172
+ 762 001a 0134     		adds	r4, r4, #1
+ 763 001c E4B2     		uxtb	r4, r4
+ 764 001e 154B     		ldr	r3, .L56
+ 765 0020 1C70     		strb	r4, [r3]
+ 181:Core/Src/sensor_task.c ****     {
+ 766              		.loc 1 181 5 view .LVU173
+ 181:Core/Src/sensor_task.c ****     {
+ 767              		.loc 1 181 8 is_stmt 0 view .LVU174
+ 768 0022 042C     		cmp	r4, #4
+ 769 0024 10D8     		bhi	.L55
+ 770              	.L49:
+ 196:Core/Src/sensor_task.c **** 
+ 771              		.loc 1 196 1 view .LVU175
+ 772 0026 03B0     		add	sp, sp, #12
+ 773              	.LCFI23:
+ 774              		.cfi_remember_state
+ 775              		.cfi_def_cfa_offset 12
+ 776              		@ sp needed
+ 777 0028 30BD     		pop	{r4, r5, pc}
+ 778              	.LVL44:
+ 779              	.L50:
+ 780              	.LCFI24:
+ 781              		.cfi_restore_state
+ 168:Core/Src/sensor_task.c ****         {
+ 782              		.loc 1 168 9 is_stmt 1 view .LVU176
+ 168:Core/Src/sensor_task.c ****         {
+ 783              		.loc 1 168 31 is_stmt 0 view .LVU177
+ 784 002a 134B     		ldr	r3, .L56+4
+ 785 002c B3F90030 		ldrsh	r3, [r3]
+ 168:Core/Src/sensor_task.c ****         {
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 33
+
+
+ 786              		.loc 1 168 12 view .LVU178
+ 787 0030 8342     		cmp	r3, r0
+ 788 0032 01DD     		ble	.L52
+ 170:Core/Src/sensor_task.c ****         }
+ 789              		.loc 1 170 13 is_stmt 1 view .LVU179
+ 170:Core/Src/sensor_task.c ****         }
+ 790              		.loc 1 170 36 is_stmt 0 view .LVU180
+ 791 0034 104B     		ldr	r3, .L56+4
+ 792 0036 1880     		strh	r0, [r3]	@ movhi
+ 793              	.L52:
+ 172:Core/Src/sensor_task.c ****         {
+ 794              		.loc 1 172 9 is_stmt 1 view .LVU181
+ 172:Core/Src/sensor_task.c ****         {
+ 795              		.loc 1 172 31 is_stmt 0 view .LVU182
+ 796 0038 104B     		ldr	r3, .L56+8
+ 797 003a B3F90030 		ldrsh	r3, [r3]
+ 172:Core/Src/sensor_task.c ****         {
+ 798              		.loc 1 172 12 view .LVU183
+ 799 003e 8342     		cmp	r3, r0
+ 800 0040 E7DA     		bge	.L51
+ 174:Core/Src/sensor_task.c ****         }
+ 801              		.loc 1 174 13 is_stmt 1 view .LVU184
+ 174:Core/Src/sensor_task.c ****         }
+ 802              		.loc 1 174 36 is_stmt 0 view .LVU185
+ 803 0042 0E4B     		ldr	r3, .L56+8
+ 804 0044 1880     		strh	r0, [r3]	@ movhi
+ 805 0046 E4E7     		b	.L51
+ 806              	.LVL45:
+ 807              	.L55:
+ 808              	.LBB8:
+ 183:Core/Src/sensor_task.c ****                                     (int32_t)s_temperature_count);
+ 809              		.loc 1 183 9 is_stmt 1 view .LVU186
+ 183:Core/Src/sensor_task.c ****                                     (int32_t)s_temperature_count);
+ 810              		.loc 1 183 60 is_stmt 0 view .LVU187
+ 811 0048 90FBF4F0 		sdiv	r0, r0, r4
+ 183:Core/Src/sensor_task.c ****                                     (int32_t)s_temperature_count);
+ 812              		.loc 1 183 17 view .LVU188
+ 813 004c 04B2     		sxth	r4, r0
+ 814              	.LVL46:
+ 187:Core/Src/sensor_task.c ****                                 average,
+ 815              		.loc 1 187 9 is_stmt 1 view .LVU189
+ 187:Core/Src/sensor_task.c ****                                 average,
+ 816              		.loc 1 187 15 is_stmt 0 view .LVU190
+ 817 004e FFF7FEFF 		bl	Sensor_GetTimestamp
+ 818              	.LVL47:
+ 819 0052 084D     		ldr	r5, .L56
+ 820 0054 2B78     		ldrb	r3, [r5]	@ zero_extendqisi2
+ 821 0056 0093     		str	r3, [sp]
+ 822 0058 084B     		ldr	r3, .L56+8
+ 823 005a B3F90030 		ldrsh	r3, [r3]
+ 824 005e 064A     		ldr	r2, .L56+4
+ 825 0060 B2F90020 		ldrsh	r2, [r2]
+ 826 0064 2146     		mov	r1, r4
+ 827 0066 FFF7FEFF 		bl	DataLogger_Append
+ 828              	.LVL48:
+ 193:Core/Src/sensor_task.c ****         s_temperature_count = 0U;
+ 829              		.loc 1 193 9 is_stmt 1 view .LVU191
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 34
+
+
+ 193:Core/Src/sensor_task.c ****         s_temperature_count = 0U;
+ 830              		.loc 1 193 32 is_stmt 0 view .LVU192
+ 831 006a 0023     		movs	r3, #0
+ 832 006c 044A     		ldr	r2, .L56+12
+ 833 006e 1360     		str	r3, [r2]
+ 194:Core/Src/sensor_task.c ****     }
+ 834              		.loc 1 194 9 is_stmt 1 view .LVU193
+ 194:Core/Src/sensor_task.c ****     }
+ 835              		.loc 1 194 29 is_stmt 0 view .LVU194
+ 836 0070 2B70     		strb	r3, [r5]
+ 837              	.LBE8:
+ 196:Core/Src/sensor_task.c **** 
+ 838              		.loc 1 196 1 view .LVU195
+ 839 0072 D8E7     		b	.L49
+ 840              	.L57:
+ 841              		.align	2
+ 842              	.L56:
+ 843 0074 00000000 		.word	.LANCHOR6
+ 844 0078 00000000 		.word	.LANCHOR7
+ 845 007c 00000000 		.word	.LANCHOR8
+ 846 0080 00000000 		.word	.LANCHOR9
+ 847              		.cfi_endproc
+ 848              	.LFE1267:
+ 850              		.section	.text.Sensor_SendTemperature,"ax",%progbits
+ 851              		.align	1
+ 852              		.syntax unified
+ 853              		.thumb
+ 854              		.thumb_func
+ 856              	Sensor_SendTemperature:
+ 857              	.LFB1270:
+ 274:Core/Src/sensor_task.c ****     tBleStatus status;
+ 858              		.loc 1 274 1 is_stmt 1 view -0
+ 859              		.cfi_startproc
+ 860              		@ args = 0, pretend = 0, frame = 0
+ 861              		@ frame_needed = 0, uses_anonymous_args = 0
+ 862 0000 08B5     		push	{r3, lr}
+ 863              	.LCFI25:
+ 864              		.cfi_def_cfa_offset 8
+ 865              		.cfi_offset 3, -8
+ 866              		.cfi_offset 14, -4
+ 275:Core/Src/sensor_task.c **** 
+ 867              		.loc 1 275 5 view .LVU197
+ 277:Core/Src/sensor_task.c ****     {
+ 868              		.loc 1 277 5 view .LVU198
+ 277:Core/Src/sensor_task.c ****     {
+ 869              		.loc 1 277 9 is_stmt 0 view .LVU199
+ 870 0002 0B4B     		ldr	r3, .L62
+ 871 0004 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 277:Core/Src/sensor_task.c ****     {
+ 872              		.loc 1 277 8 view .LVU200
+ 873 0006 13B1     		cbz	r3, .L58
+ 277:Core/Src/sensor_task.c ****     {
+ 874              		.loc 1 277 29 discriminator 1 view .LVU201
+ 875 0008 0A4B     		ldr	r3, .L62+4
+ 876 000a 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 277:Core/Src/sensor_task.c ****     {
+ 877              		.loc 1 277 26 discriminator 1 view .LVU202
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 35
+
+
+ 878 000c 03B9     		cbnz	r3, .L61
+ 879              	.L58:
+ 296:Core/Src/sensor_task.c **** 
+ 880              		.loc 1 296 1 view .LVU203
+ 881 000e 08BD     		pop	{r3, pc}
+ 882              	.L61:
+ 282:Core/Src/sensor_task.c ****                                       (uint8_t *)s_payload,
+ 883              		.loc 1 282 5 is_stmt 1 view .LVU204
+ 282:Core/Src/sensor_task.c ****                                       (uint8_t *)s_payload,
+ 884              		.loc 1 282 14 is_stmt 0 view .LVU205
+ 885 0010 094B     		ldr	r3, .L62+8
+ 886 0012 1A78     		ldrb	r2, [r3]	@ zero_extendqisi2
+ 887 0014 0949     		ldr	r1, .L62+12
+ 888 0016 4FF64260 		movw	r0, #65090
+ 889 001a FFF7FEFF 		bl	P2PS_STM_App_Update_Char
+ 890              	.LVL49:
+ 286:Core/Src/sensor_task.c ****     {
+ 891              		.loc 1 286 5 is_stmt 1 view .LVU206
+ 286:Core/Src/sensor_task.c ****     {
+ 892              		.loc 1 286 8 is_stmt 0 view .LVU207
+ 893 001e 0028     		cmp	r0, #0
+ 894 0020 F5D1     		bne	.L58
+ 288:Core/Src/sensor_task.c ****         APP_BLE_Led_Blink(SENSOR_NOTIFY_LED_MS);
+ 895              		.loc 1 288 9 is_stmt 1 view .LVU208
+ 288:Core/Src/sensor_task.c ****         APP_BLE_Led_Blink(SENSOR_NOTIFY_LED_MS);
+ 896              		.loc 1 288 25 is_stmt 0 view .LVU209
+ 897 0022 034B     		ldr	r3, .L62
+ 898 0024 0022     		movs	r2, #0
+ 899 0026 1A70     		strb	r2, [r3]
+ 289:Core/Src/sensor_task.c ****     }
+ 900              		.loc 1 289 9 is_stmt 1 view .LVU210
+ 901 0028 0F20     		movs	r0, #15
+ 902              	.LVL50:
+ 289:Core/Src/sensor_task.c ****     }
+ 903              		.loc 1 289 9 is_stmt 0 view .LVU211
+ 904 002a FFF7FEFF 		bl	APP_BLE_Led_Blink
+ 905              	.LVL51:
+ 294:Core/Src/sensor_task.c ****     }
+ 906              		.loc 1 294 28 is_stmt 1 view .LVU212
+ 907 002e EEE7     		b	.L58
+ 908              	.L63:
+ 909              		.align	2
+ 910              	.L62:
+ 911 0030 00000000 		.word	.LANCHOR2
+ 912 0034 00000000 		.word	Notification_Status
+ 913 0038 00000000 		.word	.LANCHOR1
+ 914 003c 00000000 		.word	.LANCHOR0
+ 915              		.cfi_endproc
+ 916              	.LFE1270:
+ 918              		.section	.text.Sensor_PowerOff,"ax",%progbits
+ 919              		.align	1
+ 920              		.syntax unified
+ 921              		.thumb
+ 922              		.thumb_func
+ 924              	Sensor_PowerOff:
+ 925              	.LFB1263:
+  94:Core/Src/sensor_task.c ****     GPIO_InitTypeDef gpio = {0};
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 36
+
+
+ 926              		.loc 1 94 1 view -0
+ 927              		.cfi_startproc
+ 928              		@ args = 0, pretend = 0, frame = 24
+ 929              		@ frame_needed = 0, uses_anonymous_args = 0
+ 930 0000 F0B5     		push	{r4, r5, r6, r7, lr}
+ 931              	.LCFI26:
+ 932              		.cfi_def_cfa_offset 20
+ 933              		.cfi_offset 4, -20
+ 934              		.cfi_offset 5, -16
+ 935              		.cfi_offset 6, -12
+ 936              		.cfi_offset 7, -8
+ 937              		.cfi_offset 14, -4
+ 938 0002 87B0     		sub	sp, sp, #28
+ 939              	.LCFI27:
+ 940              		.cfi_def_cfa_offset 48
+  95:Core/Src/sensor_task.c **** 
+ 941              		.loc 1 95 5 view .LVU214
+  95:Core/Src/sensor_task.c **** 
+ 942              		.loc 1 95 22 is_stmt 0 view .LVU215
+ 943 0004 0024     		movs	r4, #0
+ 944 0006 0194     		str	r4, [sp, #4]
+ 945 0008 0294     		str	r4, [sp, #8]
+ 946 000a 0394     		str	r4, [sp, #12]
+ 947 000c 0494     		str	r4, [sp, #16]
+ 948 000e 0594     		str	r4, [sp, #20]
+  97:Core/Src/sensor_task.c **** 
+ 949              		.loc 1 97 5 is_stmt 1 view .LVU216
+ 950 0010 1348     		ldr	r0, .L66
+ 951 0012 FFF7FEFF 		bl	HAL_I2C_DeInit
+ 952              	.LVL52:
+ 100:Core/Src/sensor_task.c ****     gpio.Pin = GPIO_PIN_8 | GPIO_PIN_9;
+ 953              		.loc 1 100 5 view .LVU217
+ 954              	.LBB9:
+ 955              	.LBI9:
+ 539:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h **** {
+ 956              		.loc 2 539 22 view .LVU218
+ 957              	.LBB10:
+ 541:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   SET_BIT(RCC->AHB2ENR, Periphs);
+ 958              		.loc 2 541 3 view .LVU219
+ 542:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   /* Delay after an RCC peripheral clock enabling */
+ 959              		.loc 2 542 3 view .LVU220
+ 960 0016 4FF0B043 		mov	r3, #1476395008
+ 961 001a DA6C     		ldr	r2, [r3, #76]
+ 962 001c 42F00202 		orr	r2, r2, #2
+ 963 0020 DA64     		str	r2, [r3, #76]
+ 544:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   (void)tmpreg;
+ 964              		.loc 2 544 3 view .LVU221
+ 544:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   (void)tmpreg;
+ 965              		.loc 2 544 12 is_stmt 0 view .LVU222
+ 966 0022 DB6C     		ldr	r3, [r3, #76]
+ 967 0024 03F00203 		and	r3, r3, #2
+ 544:Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_bus.h ****   (void)tmpreg;
+ 968              		.loc 2 544 10 view .LVU223
+ 969 0028 0093     		str	r3, [sp]
+ 970              		.loc 2 545 3 is_stmt 1 view .LVU224
+ 971 002a 009B     		ldr	r3, [sp]
+ 972              	.LVL53:
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 37
+
+
+ 973              		.loc 2 545 3 is_stmt 0 view .LVU225
+ 974              	.LBE10:
+ 975              	.LBE9:
+ 101:Core/Src/sensor_task.c ****     gpio.Mode = GPIO_MODE_OUTPUT_PP;
+ 976              		.loc 1 101 5 is_stmt 1 view .LVU226
+ 101:Core/Src/sensor_task.c ****     gpio.Mode = GPIO_MODE_OUTPUT_PP;
+ 977              		.loc 1 101 14 is_stmt 0 view .LVU227
+ 978 002c 4FF44077 		mov	r7, #768
+ 979 0030 0197     		str	r7, [sp, #4]
+ 102:Core/Src/sensor_task.c ****     gpio.Pull = GPIO_NOPULL;
+ 980              		.loc 1 102 5 is_stmt 1 view .LVU228
+ 102:Core/Src/sensor_task.c ****     gpio.Pull = GPIO_NOPULL;
+ 981              		.loc 1 102 15 is_stmt 0 view .LVU229
+ 982 0032 0125     		movs	r5, #1
+ 983 0034 0295     		str	r5, [sp, #8]
+ 103:Core/Src/sensor_task.c ****     gpio.Speed = GPIO_SPEED_FREQ_LOW;
+ 984              		.loc 1 103 5 is_stmt 1 view .LVU230
+ 103:Core/Src/sensor_task.c ****     gpio.Speed = GPIO_SPEED_FREQ_LOW;
+ 985              		.loc 1 103 15 is_stmt 0 view .LVU231
+ 986 0036 0394     		str	r4, [sp, #12]
+ 104:Core/Src/sensor_task.c ****     HAL_GPIO_Init(GPIOB, &gpio);
+ 987              		.loc 1 104 5 is_stmt 1 view .LVU232
+ 104:Core/Src/sensor_task.c ****     HAL_GPIO_Init(GPIOB, &gpio);
+ 988              		.loc 1 104 16 is_stmt 0 view .LVU233
+ 989 0038 0494     		str	r4, [sp, #16]
+ 105:Core/Src/sensor_task.c ****     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_8 | GPIO_PIN_9, GPIO_PIN_RESET);
+ 990              		.loc 1 105 5 is_stmt 1 view .LVU234
+ 991 003a 0A4E     		ldr	r6, .L66+4
+ 992 003c 01A9     		add	r1, sp, #4
+ 993 003e 3046     		mov	r0, r6
+ 994 0040 FFF7FEFF 		bl	HAL_GPIO_Init
+ 995              	.LVL54:
+ 106:Core/Src/sensor_task.c **** 
+ 996              		.loc 1 106 5 view .LVU235
+ 997 0044 2246     		mov	r2, r4
+ 998 0046 3946     		mov	r1, r7
+ 999 0048 3046     		mov	r0, r6
+ 1000 004a FFF7FEFF 		bl	HAL_GPIO_WritePin
+ 1001              	.LVL55:
+ 108:Core/Src/sensor_task.c ****                       SENSOR_POWER_PIN,
+ 1002              		.loc 1 108 5 view .LVU236
+ 1003 004e 2A46     		mov	r2, r5
+ 1004 0050 1021     		movs	r1, #16
+ 1005 0052 4FF09040 		mov	r0, #1207959552
+ 1006 0056 FFF7FEFF 		bl	HAL_GPIO_WritePin
+ 1007              	.LVL56:
+ 111:Core/Src/sensor_task.c **** 
+ 1008              		.loc 1 111 1 is_stmt 0 view .LVU237
+ 1009 005a 07B0     		add	sp, sp, #28
+ 1010              	.LCFI28:
+ 1011              		.cfi_def_cfa_offset 20
+ 1012              		@ sp needed
+ 1013 005c F0BD     		pop	{r4, r5, r6, r7, pc}
+ 1014              	.L67:
+ 1015 005e 00BF     		.align	2
+ 1016              	.L66:
+ 1017 0060 00000000 		.word	hi2c1
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 38
+
+
+ 1018 0064 00040048 		.word	1207960576
+ 1019              		.cfi_endproc
+ 1020              	.LFE1263:
+ 1022              		.section	.text.SensorTask_Execute,"ax",%progbits
+ 1023              		.align	1
+ 1024              		.syntax unified
+ 1025              		.thumb
+ 1026              		.thumb_func
+ 1028              	SensorTask_Execute:
+ 1029              	.LFB1271:
+ 299:Core/Src/sensor_task.c ****     SHT41_Data_t data;
+ 1030              		.loc 1 299 1 is_stmt 1 view -0
+ 1031              		.cfi_startproc
+ 1032              		@ args = 0, pretend = 0, frame = 8
+ 1033              		@ frame_needed = 0, uses_anonymous_args = 0
+ 1034 0000 10B5     		push	{r4, lr}
+ 1035              	.LCFI29:
+ 1036              		.cfi_def_cfa_offset 8
+ 1037              		.cfi_offset 4, -8
+ 1038              		.cfi_offset 14, -4
+ 1039 0002 82B0     		sub	sp, sp, #8
+ 1040              	.LCFI30:
+ 1041              		.cfi_def_cfa_offset 16
+ 300:Core/Src/sensor_task.c **** 
+ 1042              		.loc 1 300 5 view .LVU239
+ 302:Core/Src/sensor_task.c ****     {
+ 1043              		.loc 1 302 5 view .LVU240
+ 302:Core/Src/sensor_task.c ****     {
+ 1044              		.loc 1 302 9 is_stmt 0 view .LVU241
+ 1045 0004 124B     		ldr	r3, .L75
+ 1046 0006 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 302:Core/Src/sensor_task.c ****     {
+ 1047              		.loc 1 302 8 view .LVU242
+ 1048 0008 13B1     		cbz	r3, .L69
+ 304:Core/Src/sensor_task.c ****         {
+ 1049              		.loc 1 304 9 is_stmt 1 view .LVU243
+ 304:Core/Src/sensor_task.c ****         {
+ 1050              		.loc 1 304 13 is_stmt 0 view .LVU244
+ 1051 000a FFF7FEFF 		bl	Sensor_SendHistoryRecord
+ 1052              	.LVL57:
+ 304:Core/Src/sensor_task.c ****         {
+ 1053              		.loc 1 304 12 view .LVU245
+ 1054 000e E0B9     		cbnz	r0, .L68
+ 1055              	.L69:
+ 310:Core/Src/sensor_task.c **** 
+ 1056              		.loc 1 310 5 is_stmt 1 view .LVU246
+ 312:Core/Src/sensor_task.c **** 
+ 1057              		.loc 1 312 5 view .LVU247
+ 1058 0010 FFF7FEFF 		bl	Sensor_PowerOn
+ 1059              	.LVL58:
+ 314:Core/Src/sensor_task.c ****     if (status != HAL_OK)
+ 1060              		.loc 1 314 5 view .LVU248
+ 314:Core/Src/sensor_task.c ****     if (status != HAL_OK)
+ 1061              		.loc 1 314 14 is_stmt 0 view .LVU249
+ 1062 0014 0F48     		ldr	r0, .L75+4
+ 1063 0016 FFF7FEFF 		bl	SHT41_Init
+ 1064              	.LVL59:
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 39
+
+
+ 315:Core/Src/sensor_task.c ****     {
+ 1065              		.loc 1 315 5 is_stmt 1 view .LVU250
+ 315:Core/Src/sensor_task.c ****     {
+ 1066              		.loc 1 315 8 is_stmt 0 view .LVU251
+ 1067 001a A0B9     		cbnz	r0, .L74
+ 322:Core/Src/sensor_task.c ****     Sensor_PowerOff();
+ 1068              		.loc 1 322 5 is_stmt 1 view .LVU252
+ 322:Core/Src/sensor_task.c ****     Sensor_PowerOff();
+ 1069              		.loc 1 322 14 is_stmt 0 view .LVU253
+ 1070 001c 6946     		mov	r1, sp
+ 1071 001e 0D48     		ldr	r0, .L75+4
+ 1072              	.LVL60:
+ 322:Core/Src/sensor_task.c ****     Sensor_PowerOff();
+ 1073              		.loc 1 322 14 view .LVU254
+ 1074 0020 FFF7FEFF 		bl	SHT41_Read
+ 1075              	.LVL61:
+ 1076 0024 0446     		mov	r4, r0
+ 1077              	.LVL62:
+ 323:Core/Src/sensor_task.c **** 
+ 1078              		.loc 1 323 5 is_stmt 1 view .LVU255
+ 1079 0026 FFF7FEFF 		bl	Sensor_PowerOff
+ 1080              	.LVL63:
+ 325:Core/Src/sensor_task.c ****     {
+ 1081              		.loc 1 325 5 view .LVU256
+ 325:Core/Src/sensor_task.c ****     {
+ 1082              		.loc 1 325 8 is_stmt 0 view .LVU257
+ 1083 002a 74B9     		cbnz	r4, .L68
+ 331:Core/Src/sensor_task.c **** 
+ 1084              		.loc 1 331 5 is_stmt 1 view .LVU258
+ 331:Core/Src/sensor_task.c **** 
+ 1085              		.loc 1 331 33 is_stmt 0 view .LVU259
+ 1086 002c 9DED000A 		vldr.32	s0, [sp]
+ 1087 0030 FFF7FEFF 		bl	Sensor_TemperatureToCenti
+ 1088              	.LVL64:
+ 1089 0034 0446     		mov	r4, r0
+ 1090              	.LVL65:
+ 333:Core/Src/sensor_task.c ****     Sensor_SetTemperaturePayload(temperature_centi);
+ 1091              		.loc 1 333 5 is_stmt 1 view .LVU260
+ 1092 0036 FFF7FEFF 		bl	Sensor_UpdateOfflineLog
+ 1093              	.LVL66:
+ 334:Core/Src/sensor_task.c ****     Sensor_SendTemperature();
+ 1094              		.loc 1 334 5 view .LVU261
+ 1095 003a 2046     		mov	r0, r4
+ 1096 003c FFF7FEFF 		bl	Sensor_SetTemperaturePayload
+ 1097              	.LVL67:
+ 335:Core/Src/sensor_task.c **** }
+ 1098              		.loc 1 335 5 view .LVU262
+ 1099 0040 FFF7FEFF 		bl	Sensor_SendTemperature
+ 1100              	.LVL68:
+ 1101 0044 01E0     		b	.L68
+ 1102              	.LVL69:
+ 1103              	.L74:
+ 317:Core/Src/sensor_task.c ****         APP_DBG_MSG("SHT41 reset failed: %d\r\n", (int)status);
+ 1104              		.loc 1 317 9 view .LVU263
+ 1105 0046 FFF7FEFF 		bl	Sensor_PowerOff
+ 1106              	.LVL70:
+ 318:Core/Src/sensor_task.c ****         return;
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 40
+
+
+ 1107              		.loc 1 318 63 view .LVU264
+ 319:Core/Src/sensor_task.c ****     }
+ 1108              		.loc 1 319 9 view .LVU265
+ 1109              	.L68:
+ 336:Core/Src/sensor_task.c **** 
+ 1110              		.loc 1 336 1 is_stmt 0 view .LVU266
+ 1111 004a 02B0     		add	sp, sp, #8
+ 1112              	.LCFI31:
+ 1113              		.cfi_def_cfa_offset 8
+ 1114              		@ sp needed
+ 1115 004c 10BD     		pop	{r4, pc}
+ 1116              	.L76:
+ 1117 004e 00BF     		.align	2
+ 1118              	.L75:
+ 1119 0050 00000000 		.word	.LANCHOR3
+ 1120 0054 00000000 		.word	hi2c1
+ 1121              		.cfi_endproc
+ 1122              	.LFE1271:
+ 1124              		.section	.text.SensorTask_Init,"ax",%progbits
+ 1125              		.align	1
+ 1126              		.global	SensorTask_Init
+ 1127              		.syntax unified
+ 1128              		.thumb
+ 1129              		.thumb_func
+ 1131              	SensorTask_Init:
+ 1132              	.LFB1274:
+ 349:Core/Src/sensor_task.c **** 
+ 350:Core/Src/sensor_task.c **** void SensorTask_Init(void)
+ 351:Core/Src/sensor_task.c **** {
+ 1133              		.loc 1 351 1 is_stmt 1 view -0
+ 1134              		.cfi_startproc
+ 1135              		@ args = 0, pretend = 0, frame = 0
+ 1136              		@ frame_needed = 0, uses_anonymous_args = 0
+ 1137 0000 10B5     		push	{r4, lr}
+ 1138              	.LCFI32:
+ 1139              		.cfi_def_cfa_offset 8
+ 1140              		.cfi_offset 4, -8
+ 1141              		.cfi_offset 14, -4
+ 352:Core/Src/sensor_task.c ****     UTIL_SEQ_RegTask(1U << CFG_TASK_SENSOR_MEASURE_ID,
+ 1142              		.loc 1 352 5 view .LVU268
+ 1143 0002 144A     		ldr	r2, .L79
+ 1144 0004 0021     		movs	r1, #0
+ 1145 0006 0420     		movs	r0, #4
+ 1146 0008 FFF7FEFF 		bl	UTIL_SEQ_RegTask
+ 1147              	.LVL71:
+ 353:Core/Src/sensor_task.c ****                      UTIL_SEQ_RFU,
+ 354:Core/Src/sensor_task.c ****                      SensorTask_Execute);
+ 355:Core/Src/sensor_task.c **** 
+ 356:Core/Src/sensor_task.c ****     HW_TS_Create(CFG_TIM_PROC_ID_ISR,
+ 1148              		.loc 1 356 5 view .LVU269
+ 1149 000c 124C     		ldr	r4, .L79+4
+ 1150 000e 134B     		ldr	r3, .L79+8
+ 1151 0010 0122     		movs	r2, #1
+ 1152 0012 2146     		mov	r1, r4
+ 1153 0014 0020     		movs	r0, #0
+ 1154 0016 FFF7FEFF 		bl	HW_TS_Create
+ 1155              	.LVL72:
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 41
+
+
+ 357:Core/Src/sensor_task.c ****                  &s_sensor_timer_id,
+ 358:Core/Src/sensor_task.c ****                  hw_ts_Repeated,
+ 359:Core/Src/sensor_task.c ****                  SensorTimer_Callback);
+ 360:Core/Src/sensor_task.c **** 
+ 361:Core/Src/sensor_task.c ****     HW_TS_Create(CFG_TIM_PROC_ID_ISR,
+ 1156              		.loc 1 361 5 view .LVU270
+ 1157 001a 114B     		ldr	r3, .L79+12
+ 1158 001c 0022     		movs	r2, #0
+ 1159 001e 1149     		ldr	r1, .L79+16
+ 1160 0020 1046     		mov	r0, r2
+ 1161 0022 FFF7FEFF 		bl	HW_TS_Create
+ 1162              	.LVL73:
+ 362:Core/Src/sensor_task.c ****                  &s_history_timer_id,
+ 363:Core/Src/sensor_task.c ****                  hw_ts_SingleShot,
+ 364:Core/Src/sensor_task.c ****                  HistoryTimer_Callback);
+ 365:Core/Src/sensor_task.c **** 
+ 366:Core/Src/sensor_task.c ****     s_initialized = 1U;
+ 1163              		.loc 1 366 5 view .LVU271
+ 1164              		.loc 1 366 19 is_stmt 0 view .LVU272
+ 1165 0026 104B     		ldr	r3, .L79+20
+ 1166 0028 0122     		movs	r2, #1
+ 1167 002a 1A70     		strb	r2, [r3]
+ 367:Core/Src/sensor_task.c ****     s_payload_valid = 0U;
+ 1168              		.loc 1 367 5 is_stmt 1 view .LVU273
+ 1169              		.loc 1 367 21 is_stmt 0 view .LVU274
+ 1170 002c 0023     		movs	r3, #0
+ 1171 002e 0F4A     		ldr	r2, .L79+24
+ 1172 0030 1370     		strb	r3, [r2]
+ 368:Core/Src/sensor_task.c ****     s_history_active = 0U;
+ 1173              		.loc 1 368 5 is_stmt 1 view .LVU275
+ 1174              		.loc 1 368 22 is_stmt 0 view .LVU276
+ 1175 0032 0F4A     		ldr	r2, .L79+28
+ 1176 0034 1370     		strb	r3, [r2]
+ 369:Core/Src/sensor_task.c ****     s_history_index = 0U;
+ 1177              		.loc 1 369 5 is_stmt 1 view .LVU277
+ 1178              		.loc 1 369 21 is_stmt 0 view .LVU278
+ 1179 0036 0F4A     		ldr	r2, .L79+32
+ 1180 0038 1360     		str	r3, [r2]
+ 370:Core/Src/sensor_task.c ****     s_temperature_sum_x100 = 0;
+ 1181              		.loc 1 370 5 is_stmt 1 view .LVU279
+ 1182              		.loc 1 370 28 is_stmt 0 view .LVU280
+ 1183 003a 0F4A     		ldr	r2, .L79+36
+ 1184 003c 1360     		str	r3, [r2]
+ 371:Core/Src/sensor_task.c ****     s_temperature_count = 0U;
+ 1185              		.loc 1 371 5 is_stmt 1 view .LVU281
+ 1186              		.loc 1 371 25 is_stmt 0 view .LVU282
+ 1187 003e 0F4A     		ldr	r2, .L79+40
+ 1188 0040 1370     		strb	r3, [r2]
+ 372:Core/Src/sensor_task.c **** 
+ 373:Core/Src/sensor_task.c ****     if (DataLogger_Init() != HAL_OK)
+ 1189              		.loc 1 373 5 is_stmt 1 view .LVU283
+ 1190              		.loc 1 373 9 is_stmt 0 view .LVU284
+ 1191 0042 FFF7FEFF 		bl	DataLogger_Init
+ 1192              	.LVL74:
+ 374:Core/Src/sensor_task.c ****     {
+ 375:Core/Src/sensor_task.c ****         APP_DBG_MSG("Data logger initialization failed\r\n");
+ 1193              		.loc 1 375 61 is_stmt 1 view .LVU285
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 42
+
+
+ 376:Core/Src/sensor_task.c ****     }
+ 377:Core/Src/sensor_task.c **** 
+ 378:Core/Src/sensor_task.c ****     Sensor_PowerOff();
+ 1194              		.loc 1 378 5 view .LVU286
+ 1195 0046 FFF7FEFF 		bl	Sensor_PowerOff
+ 1196              	.LVL75:
+ 379:Core/Src/sensor_task.c ****     HW_TS_Start(s_sensor_timer_id, SENSOR_PERIOD_TICKS);
+ 1197              		.loc 1 379 5 view .LVU287
+ 1198 004a 0D49     		ldr	r1, .L79+44
+ 1199 004c 2078     		ldrb	r0, [r4]	@ zero_extendqisi2
+ 1200 004e FFF7FEFF 		bl	HW_TS_Start
+ 1201              	.LVL76:
+ 380:Core/Src/sensor_task.c **** }
+ 1202              		.loc 1 380 1 is_stmt 0 view .LVU288
+ 1203 0052 10BD     		pop	{r4, pc}
+ 1204              	.L80:
+ 1205              		.align	2
+ 1206              	.L79:
+ 1207 0054 00000000 		.word	SensorTask_Execute
+ 1208 0058 00000000 		.word	.LANCHOR10
+ 1209 005c 00000000 		.word	SensorTimer_Callback
+ 1210 0060 00000000 		.word	HistoryTimer_Callback
+ 1211 0064 00000000 		.word	.LANCHOR5
+ 1212 0068 00000000 		.word	.LANCHOR11
+ 1213 006c 00000000 		.word	.LANCHOR2
+ 1214 0070 00000000 		.word	.LANCHOR3
+ 1215 0074 00000000 		.word	.LANCHOR4
+ 1216 0078 00000000 		.word	.LANCHOR9
+ 1217 007c 00000000 		.word	.LANCHOR6
+ 1218 0080 47E00100 		.word	122951
+ 1219              		.cfi_endproc
+ 1220              	.LFE1274:
+ 1222              		.section	.text.SensorTask_Stop,"ax",%progbits
+ 1223              		.align	1
+ 1224              		.global	SensorTask_Stop
+ 1225              		.syntax unified
+ 1226              		.thumb
+ 1227              		.thumb_func
+ 1229              	SensorTask_Stop:
+ 1230              	.LFB1276:
+ 381:Core/Src/sensor_task.c **** 
+ 382:Core/Src/sensor_task.c **** void SensorTask_Start(void)
+ 383:Core/Src/sensor_task.c **** {
+ 384:Core/Src/sensor_task.c ****     SensorTask_RequestMeasurement();
+ 385:Core/Src/sensor_task.c **** }
+ 386:Core/Src/sensor_task.c **** 
+ 387:Core/Src/sensor_task.c **** void SensorTask_Stop(void)
+ 388:Core/Src/sensor_task.c **** {
+ 1231              		.loc 1 388 1 is_stmt 1 view -0
+ 1232              		.cfi_startproc
+ 1233              		@ args = 0, pretend = 0, frame = 0
+ 1234              		@ frame_needed = 0, uses_anonymous_args = 0
+ 1235 0000 08B5     		push	{r3, lr}
+ 1236              	.LCFI33:
+ 1237              		.cfi_def_cfa_offset 8
+ 1238              		.cfi_offset 3, -8
+ 1239              		.cfi_offset 14, -4
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 43
+
+
+ 389:Core/Src/sensor_task.c ****     /* Sampling remains autonomous after BLE disconnection. */
+ 390:Core/Src/sensor_task.c ****     Sensor_PowerOff();
+ 1240              		.loc 1 390 5 view .LVU290
+ 1241 0002 FFF7FEFF 		bl	Sensor_PowerOff
+ 1242              	.LVL77:
+ 391:Core/Src/sensor_task.c **** }
+ 1243              		.loc 1 391 1 is_stmt 0 view .LVU291
+ 1244 0006 08BD     		pop	{r3, pc}
+ 1245              		.cfi_endproc
+ 1246              	.LFE1276:
+ 1248              		.section	.text.SensorTask_RequestMeasurement,"ax",%progbits
+ 1249              		.align	1
+ 1250              		.global	SensorTask_RequestMeasurement
+ 1251              		.syntax unified
+ 1252              		.thumb
+ 1253              		.thumb_func
+ 1255              	SensorTask_RequestMeasurement:
+ 1256              	.LFB1277:
+ 392:Core/Src/sensor_task.c **** 
+ 393:Core/Src/sensor_task.c **** void SensorTask_RequestMeasurement(void)
+ 394:Core/Src/sensor_task.c **** {
+ 1257              		.loc 1 394 1 is_stmt 1 view -0
+ 1258              		.cfi_startproc
+ 1259              		@ args = 0, pretend = 0, frame = 0
+ 1260              		@ frame_needed = 0, uses_anonymous_args = 0
+ 1261 0000 08B5     		push	{r3, lr}
+ 1262              	.LCFI34:
+ 1263              		.cfi_def_cfa_offset 8
+ 1264              		.cfi_offset 3, -8
+ 1265              		.cfi_offset 14, -4
+ 395:Core/Src/sensor_task.c ****     if (s_initialized)
+ 1266              		.loc 1 395 5 view .LVU293
+ 1267              		.loc 1 395 9 is_stmt 0 view .LVU294
+ 1268 0002 0A4B     		ldr	r3, .L89
+ 1269 0004 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 1270              		.loc 1 395 8 view .LVU295
+ 1271 0006 03B9     		cbnz	r3, .L88
+ 1272              	.L83:
+ 396:Core/Src/sensor_task.c ****     {
+ 397:Core/Src/sensor_task.c ****         s_history_index = 0U;
+ 398:Core/Src/sensor_task.c ****         s_history_active = (DataLogger_GetRecordCount() > 0U) ? 1U : 0U;
+ 399:Core/Src/sensor_task.c ****         UTIL_SEQ_SetTask(1U << CFG_TASK_SENSOR_MEASURE_ID,
+ 400:Core/Src/sensor_task.c ****                          CFG_SCH_PRIO_0);
+ 401:Core/Src/sensor_task.c ****     }
+ 402:Core/Src/sensor_task.c **** }...
+ 1273              		.loc 1 402 1 view .LVU296
+ 1274 0008 08BD     		pop	{r3, pc}
+ 1275              	.L88:
+ 397:Core/Src/sensor_task.c ****         s_history_index = 0U;
+ 1276              		.loc 1 397 9 is_stmt 1 view .LVU297
+ 397:Core/Src/sensor_task.c ****         s_history_index = 0U;
+ 1277              		.loc 1 397 25 is_stmt 0 view .LVU298
+ 1278 000a 094B     		ldr	r3, .L89+4
+ 1279 000c 0022     		movs	r2, #0
+ 1280 000e 1A60     		str	r2, [r3]
+ 398:Core/Src/sensor_task.c ****         s_history_active = (DataLogger_GetRecordCount() > 0U) ? 1U : 0U;
+ 1281              		.loc 1 398 9 is_stmt 1 view .LVU299
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 44
+
+
+ 398:Core/Src/sensor_task.c ****         s_history_active = (DataLogger_GetRecordCount() > 0U) ? 1U : 0U;
+ 1282              		.loc 1 398 29 is_stmt 0 view .LVU300
+ 1283 0010 FFF7FEFF 		bl	DataLogger_GetRecordCount
+ 1284              	.LVL78:
+ 398:Core/Src/sensor_task.c ****         s_history_active = (DataLogger_GetRecordCount() > 0U) ? 1U : 0U;
+ 1285              		.loc 1 398 26 view .LVU301
+ 1286 0014 38B1     		cbz	r0, .L86
+ 1287 0016 0122     		movs	r2, #1
+ 1288              	.L85:
+ 398:Core/Src/sensor_task.c ****         s_history_active = (DataLogger_GetRecordCount() > 0U) ? 1U : 0U;
+ 1289              		.loc 1 398 26 discriminator 4 view .LVU302
+ 1290 0018 064B     		ldr	r3, .L89+8
+ 1291 001a 1A70     		strb	r2, [r3]
+ 399:Core/Src/sensor_task.c ****         UTIL_SEQ_SetTask(1U << CFG_TASK_SENSOR_MEASURE_ID,
+ 1292              		.loc 1 399 9 is_stmt 1 discriminator 4 view .LVU303
+ 1293 001c 0021     		movs	r1, #0
+ 1294 001e 0420     		movs	r0, #4
+ 1295 0020 FFF7FEFF 		bl	UTIL_SEQ_SetTask
+ 1296              	.LVL79:
+ 1297              		.loc 1 402 1 is_stmt 0 discriminator 4 view .LVU304
+ 1298 0024 F0E7     		b	.L83
+ 1299              	.L86:
+ 398:Core/Src/sensor_task.c ****         s_history_active = (DataLogger_GetRecordCount() > 0U) ? 1U : 0U;
+ 1300              		.loc 1 398 26 view .LVU305
+ 1301 0026 0022     		movs	r2, #0
+ 1302 0028 F6E7     		b	.L85
+ 1303              	.L90:
+ 1304 002a 00BF     		.align	2
+ 1305              	.L89:
+ 1306 002c 00000000 		.word	.LANCHOR11
+ 1307 0030 00000000 		.word	.LANCHOR4
+ 1308 0034 00000000 		.word	.LANCHOR3
+ 1309              		.cfi_endproc
+ 1310              	.LFE1277:
+ 1312              		.section	.text.SensorTask_Start,"ax",%progbits
+ 1313              		.align	1
+ 1314              		.global	SensorTask_Start
+ 1315              		.syntax unified
+ 1316              		.thumb
+ 1317              		.thumb_func
+ 1319              	SensorTask_Start:
+ 1320              	.LFB1275:
+ 383:Core/Src/sensor_task.c **** {
+ 1321              		.loc 1 383 1 is_stmt 1 view -0
+ 1322              		.cfi_startproc
+ 1323              		@ args = 0, pretend = 0, frame = 0
+ 1324              		@ frame_needed = 0, uses_anonymous_args = 0
+ 1325 0000 08B5     		push	{r3, lr}
+ 1326              	.LCFI35:
+ 1327              		.cfi_def_cfa_offset 8
+ 1328              		.cfi_offset 3, -8
+ 1329              		.cfi_offset 14, -4
+ 384:Core/Src/sensor_task.c ****     SensorTask_RequestMeasurement();
+ 1330              		.loc 1 384 5 view .LVU307
+ 1331 0002 FFF7FEFF 		bl	SensorTask_RequestMeasurement
+ 1332              	.LVL80:
+ 385:Core/Src/sensor_task.c **** }
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 45
+
+
+ 1333              		.loc 1 385 1 is_stmt 0 view .LVU308
+ 1334 0006 08BD     		pop	{r3, pc}
+ 1335              		.cfi_endproc
+ 1336              	.LFE1275:
+ 1338              		.section	.bss.s_history_active,"aw",%nobits
+ 1339              		.set	.LANCHOR3,. + 0
+ 1342              	s_history_active:
+ 1343 0000 00       		.space	1
+ 1344              		.section	.bss.s_history_index,"aw",%nobits
+ 1345              		.align	2
+ 1346              		.set	.LANCHOR4,. + 0
+ 1349              	s_history_index:
+ 1350 0000 00000000 		.space	4
+ 1351              		.section	.bss.s_history_timer_id,"aw",%nobits
+ 1352              		.set	.LANCHOR5,. + 0
+ 1355              	s_history_timer_id:
+ 1356 0000 00       		.space	1
+ 1357              		.section	.bss.s_initialized,"aw",%nobits
+ 1358              		.set	.LANCHOR11,. + 0
+ 1361              	s_initialized:
+ 1362 0000 00       		.space	1
+ 1363              		.section	.bss.s_payload,"aw",%nobits
+ 1364              		.align	2
+ 1365              		.set	.LANCHOR0,. + 0
+ 1368              	s_payload:
+ 1369 0000 00000000 		.space	16
+ 1369      00000000 
+ 1369      00000000 
+ 1369      00000000 
+ 1370              		.section	.bss.s_payload_length,"aw",%nobits
+ 1371              		.set	.LANCHOR1,. + 0
+ 1374              	s_payload_length:
+ 1375 0000 00       		.space	1
+ 1376              		.section	.bss.s_payload_valid,"aw",%nobits
+ 1377              		.set	.LANCHOR2,. + 0
+ 1380              	s_payload_valid:
+ 1381 0000 00       		.space	1
+ 1382              		.section	.bss.s_sensor_timer_id,"aw",%nobits
+ 1383              		.set	.LANCHOR10,. + 0
+ 1386              	s_sensor_timer_id:
+ 1387 0000 00       		.space	1
+ 1388              		.section	.bss.s_temperature_count,"aw",%nobits
+ 1389              		.set	.LANCHOR6,. + 0
+ 1392              	s_temperature_count:
+ 1393 0000 00       		.space	1
+ 1394              		.section	.bss.s_temperature_max_x100,"aw",%nobits
+ 1395              		.align	1
+ 1396              		.set	.LANCHOR8,. + 0
+ 1399              	s_temperature_max_x100:
+ 1400 0000 0000     		.space	2
+ 1401              		.section	.bss.s_temperature_min_x100,"aw",%nobits
+ 1402              		.align	1
+ 1403              		.set	.LANCHOR7,. + 0
+ 1406              	s_temperature_min_x100:
+ 1407 0000 0000     		.space	2
+ 1408              		.section	.bss.s_temperature_sum_x100,"aw",%nobits
+ 1409              		.align	2
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 46
+
+
+ 1410              		.set	.LANCHOR9,. + 0
+ 1413              	s_temperature_sum_x100:
+ 1414 0000 00000000 		.space	4
+ 1415              		.text
+ 1416              	.Letext0:
+ 1417              		.file 3 "g:\\arm\\10 2021.10\\arm-none-eabi\\include\\machine\\_default_types.h"
+ 1418              		.file 4 "g:\\arm\\10 2021.10\\arm-none-eabi\\include\\sys\\_stdint.h"
+ 1419              		.file 5 "g:\\arm\\10 2021.10\\lib\\gcc\\arm-none-eabi\\10.3.1\\include\\stddef.h"
+ 1420              		.file 6 "Drivers/CMSIS/Device/ST/STM32WBxx/Include/stm32wb55xx.h"
+ 1421              		.file 7 "Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_hal_def.h"
+ 1422              		.file 8 "Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_hal_dma.h"
+ 1423              		.file 9 "Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_hal_gpio.h"
+ 1424              		.file 10 "Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_hal_i2c.h"
+ 1425              		.file 11 "Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_hal_rtc.h"
+ 1426              		.file 12 "Core/Inc/hw_if.h"
+ 1427              		.file 13 "Core/Inc/app_conf.h"
+ 1428              		.file 14 "Middlewares/ST/STM32_WPAN/ble/core/auto/ble_types.h"
+ 1429              		.file 15 "Core/Inc/data_logger.h"
+ 1430              		.file 16 "Core/Inc/main.h"
+ 1431              		.file 17 "Core/Inc/i2c.h"
+ 1432              		.file 18 "Core/Inc/rtc.h"
+ 1433              		.file 19 "Core/Inc/sht41.h"
+ 1434              		.file 20 "Utilities/sequencer/stm32_seq.h"
+ 1435              		.file 21 "Middlewares/ST/STM32_WPAN/ble/svc/Inc/p2p_stm.h"
+ 1436              		.file 22 "STM32_WPAN/App/app_ble.h"
+ 1437              		.file 23 "g:\\arm\\10 2021.10\\arm-none-eabi\\include\\stdio.h"
+ 1438              		.file 24 "Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_hal.h"
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 47
+
+
+DEFINED SYMBOLS
+                            *ABS*:00000000 sensor_task.c
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:20     .text.Sensor_TemperatureToCenti:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:25     .text.Sensor_TemperatureToCenti:00000000 Sensor_TemperatureToCenti
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:71     .text.Sensor_TemperatureToCenti:00000044 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:76     .text.HistoryTimer_Callback:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:81     .text.HistoryTimer_Callback:00000000 HistoryTimer_Callback
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:103    .text.SensorTimer_Callback:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:108    .text.SensorTimer_Callback:00000000 SensorTimer_Callback
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:130    .rodata.Sensor_CentiToText.str1.4:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:134    .text.Sensor_CentiToText:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:139    .text.Sensor_CentiToText:00000000 Sensor_CentiToText
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:208    .text.Sensor_CentiToText:00000038 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:214    .rodata.Sensor_SetTemperaturePayload.str1.4:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:218    .text.Sensor_SetTemperaturePayload:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:223    .text.Sensor_SetTemperaturePayload:00000000 Sensor_SetTemperaturePayload
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:306    .text.Sensor_SetTemperaturePayload:00000044 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:315    .rodata.Sensor_SendHistoryRecord.str1.4:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:319    .text.Sensor_SendHistoryRecord:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:324    .text.Sensor_SendHistoryRecord:00000000 Sensor_SendHistoryRecord
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:502    .text.Sensor_SendHistoryRecord:000000c0 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:511    .text.Sensor_I2C_LinesToAF:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:516    .text.Sensor_I2C_LinesToAF:00000000 Sensor_I2C_LinesToAF
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:590    .text.Sensor_I2C_LinesToAF:00000044 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:595    .text.Sensor_PowerOn:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:600    .text.Sensor_PowerOn:00000000 Sensor_PowerOn
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:633    .text.Sensor_GetTimestamp:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:638    .text.Sensor_GetTimestamp:00000000 Sensor_GetTimestamp
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:711    .text.Sensor_GetTimestamp:0000005c $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:716    .text.Sensor_UpdateOfflineLog:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:721    .text.Sensor_UpdateOfflineLog:00000000 Sensor_UpdateOfflineLog
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:843    .text.Sensor_UpdateOfflineLog:00000074 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:851    .text.Sensor_SendTemperature:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:856    .text.Sensor_SendTemperature:00000000 Sensor_SendTemperature
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:911    .text.Sensor_SendTemperature:00000030 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:919    .text.Sensor_PowerOff:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:924    .text.Sensor_PowerOff:00000000 Sensor_PowerOff
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1017   .text.Sensor_PowerOff:00000060 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1023   .text.SensorTask_Execute:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1028   .text.SensorTask_Execute:00000000 SensorTask_Execute
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1119   .text.SensorTask_Execute:00000050 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1125   .text.SensorTask_Init:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1131   .text.SensorTask_Init:00000000 SensorTask_Init
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1207   .text.SensorTask_Init:00000054 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1223   .text.SensorTask_Stop:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1229   .text.SensorTask_Stop:00000000 SensorTask_Stop
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1249   .text.SensorTask_RequestMeasurement:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1255   .text.SensorTask_RequestMeasurement:00000000 SensorTask_RequestMeasurement
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1306   .text.SensorTask_RequestMeasurement:0000002c $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1313   .text.SensorTask_Start:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1319   .text.SensorTask_Start:00000000 SensorTask_Start
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1342   .bss.s_history_active:00000000 s_history_active
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1343   .bss.s_history_active:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1345   .bss.s_history_index:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1349   .bss.s_history_index:00000000 s_history_index
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1355   .bss.s_history_timer_id:00000000 s_history_timer_id
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1356   .bss.s_history_timer_id:00000000 $d
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s 			page 48
+
+
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1361   .bss.s_initialized:00000000 s_initialized
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1362   .bss.s_initialized:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1364   .bss.s_payload:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1368   .bss.s_payload:00000000 s_payload
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1374   .bss.s_payload_length:00000000 s_payload_length
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1375   .bss.s_payload_length:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1380   .bss.s_payload_valid:00000000 s_payload_valid
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1381   .bss.s_payload_valid:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1386   .bss.s_sensor_timer_id:00000000 s_sensor_timer_id
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1387   .bss.s_sensor_timer_id:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1392   .bss.s_temperature_count:00000000 s_temperature_count
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1393   .bss.s_temperature_count:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1395   .bss.s_temperature_max_x100:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1399   .bss.s_temperature_max_x100:00000000 s_temperature_max_x100
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1402   .bss.s_temperature_min_x100:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1406   .bss.s_temperature_min_x100:00000000 s_temperature_min_x100
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1409   .bss.s_temperature_sum_x100:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\ccuRIjyK.s:1413   .bss.s_temperature_sum_x100:00000000 s_temperature_sum_x100
+
+UNDEFINED SYMBOLS
+UTIL_SEQ_SetTask
+snprintf
+DataLogger_GetRecordCount
+DataLogger_Read
+P2PS_STM_App_Update_Char
+HW_TS_Start
+Notification_Status
+HAL_GPIO_Init
+HAL_GPIO_WritePin
+HAL_Delay
+MX_I2C1_Init
+HAL_RTC_GetTime
+HAL_RTC_GetDate
+hrtc
+DataLogger_Append
+APP_BLE_Led_Blink
+HAL_I2C_DeInit
+hi2c1
+SHT41_Init
+SHT41_Read
+UTIL_SEQ_RegTask
+HW_TS_Create
+DataLogger_Init

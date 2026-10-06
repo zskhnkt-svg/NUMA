@@ -90,16 +90,17 @@ build/app_ble.o: STM32_WPAN/App/app_ble.c Core/Inc/main.h \
  Middlewares/ST/STM32_WPAN/ble/svc/Inc/tps.h \
  Middlewares/ST/STM32_WPAN/ble/svc/Inc/motenv_stm.h \
  Middlewares/ST/STM32_WPAN/ble/svc/Inc/p2p_stm.h \
- Middlewares/ST/STM32_WPAN/ble/svc/Inc/zdd_stm.h \
- Middlewares/ST/STM32_WPAN/ble/svc/Inc/otas_stm.h \
+ Middlewares/ST/STM32_WPAN/ble/svc/Src/common_blesvc.h \
+ Middlewares/ST/STM32_WPAN/ble/ble_common.h \
+ Middlewares/ST/STM32_WPAN/interface/patterns/ble_thread/tl/tl.h \
  Middlewares/ST/STM32_WPAN/stm32_wpan_common.h \
  Drivers/CMSIS/Include/cmsis_compiler.h \
+ Middlewares/ST/STM32_WPAN/ble/svc/Inc/zdd_stm.h \
+ Middlewares/ST/STM32_WPAN/ble/svc/Inc/otas_stm.h \
  Middlewares/ST/STM32_WPAN/ble/svc/Inc/mesh.h \
  Middlewares/ST/STM32_WPAN/ble/svc/Inc/template_stm.h \
  Middlewares/ST/STM32_WPAN/ble/svc/Inc/svc_ctl.h \
- Middlewares/ST/STM32_WPAN/ble/svc/Inc/uuid.h \
- Middlewares/ST/STM32_WPAN/interface/patterns/ble_thread/tl/tl.h \
- STM32_WPAN/App/app_ble.h \
+ Middlewares/ST/STM32_WPAN/ble/svc/Inc/uuid.h STM32_WPAN/App/app_ble.h \
  Middlewares/ST/STM32_WPAN/interface/patterns/ble_thread/tl/hci_tl.h \
  Middlewares/ST/STM32_WPAN/interface/patterns/ble_thread/tl/tl.h \
  Utilities/sequencer/stm32_seq.h \
@@ -108,7 +109,8 @@ build/app_ble.o: STM32_WPAN/App/app_ble.c Core/Inc/main.h \
  Utilities/lpm/tiny_lpm/stm32_lpm.h \
  Middlewares/ST/STM32_WPAN/utilities/otp.h \
  Middlewares/ST/STM32_WPAN/utilities/utilities_common.h \
- STM32_WPAN/App/p2p_server_app.h
+ STM32_WPAN/App/p2p_server_app.h \
+ Middlewares/ST/STM32_WPAN/ble/svc/Inc/p2p_stm.h Core/Inc/sensor_task.h
 Core/Inc/main.h:
 Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_hal.h:
 Core/Inc/stm32wbxx_hal_conf.h:
@@ -208,15 +210,17 @@ Middlewares/ST/STM32_WPAN/ble/svc/Inc/lls.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/tps.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/motenv_stm.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/p2p_stm.h:
-Middlewares/ST/STM32_WPAN/ble/svc/Inc/zdd_stm.h:
-Middlewares/ST/STM32_WPAN/ble/svc/Inc/otas_stm.h:
+Middlewares/ST/STM32_WPAN/ble/svc/Src/common_blesvc.h:
+Middlewares/ST/STM32_WPAN/ble/ble_common.h:
+Middlewares/ST/STM32_WPAN/interface/patterns/ble_thread/tl/tl.h:
 Middlewares/ST/STM32_WPAN/stm32_wpan_common.h:
 Drivers/CMSIS/Include/cmsis_compiler.h:
+Middlewares/ST/STM32_WPAN/ble/svc/Inc/zdd_stm.h:
+Middlewares/ST/STM32_WPAN/ble/svc/Inc/otas_stm.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/mesh.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/template_stm.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/svc_ctl.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/uuid.h:
-Middlewares/ST/STM32_WPAN/interface/patterns/ble_thread/tl/tl.h:
 STM32_WPAN/App/app_ble.h:
 Middlewares/ST/STM32_WPAN/interface/patterns/ble_thread/tl/hci_tl.h:
 Middlewares/ST/STM32_WPAN/interface/patterns/ble_thread/tl/tl.h:
@@ -227,3 +231,5 @@ Utilities/lpm/tiny_lpm/stm32_lpm.h:
 Middlewares/ST/STM32_WPAN/utilities/otp.h:
 Middlewares/ST/STM32_WPAN/utilities/utilities_common.h:
 STM32_WPAN/App/p2p_server_app.h:
+Middlewares/ST/STM32_WPAN/ble/svc/Inc/p2p_stm.h:
+Core/Inc/sensor_task.h:

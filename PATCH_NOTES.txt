@@ -1,0 +1,31 @@
+# BLE + SHT41 clean patch
+
+Replace the files in the project with the files from this archive.
+
+Obsolete files that can be removed from the project:
+- Core/Src/sensor_task.c        (replaced)
+- Core/Inc/sensor_task.h        (replaced)
+- Core/Src/sht3x.c
+- Core/Inc/sht3x.h
+- Core/Src/ble_sensor_service.c
+- Core/Inc/ble_sensor_service.h
+- Core/Src/ble_env_service.c
+- Core/Inc/ble_env_service.h
+- Core/Src/main_patch.c
+
+No change is required in app_conf.h: CFG_TASK_SENSOR_MEASURE_ID is already present.
+
+Behavior:
+- BLE remains available/connected.
+- SHT41 is powered only during measurement.
+- First measurement is made when BLE notifications are enabled.
+- Next measurements: every 5 seconds.
+- Temperature is sent as ASCII, e.g. "36.42".
+- PA10: 15 ms pulse after successful BLE transmission.
+- Between events STM32WB uses the existing low-power manager / STOP2 path.
+
+Hardware correction:
+- PA4 controls the SHT41 supply through a P-channel MOSFET.
+- PA4 LOW = SHT41 power ON.
+- PA4 HIGH = SHT41 power OFF.
+- PA10 remains only the BLE transmission debug LED.

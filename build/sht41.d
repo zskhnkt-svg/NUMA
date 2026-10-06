@@ -1,4 +1,4 @@
-build/sht41.o: Core/Src/sht41.c Core/Inc/sht41.h Core/Inc/main.h \
+build/sht41.o: Core/Src/sht41.c Core/Inc/sht41.h \
  Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_hal.h \
  Core/Inc/stm32wbxx_hal_conf.h \
  Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_hal_dma.h \
@@ -34,8 +34,8 @@ build/sht41.o: Core/Src/sht41.c Core/Inc/sht41.h Core/Inc/main.h \
  Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_crs.h \
  Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_hal_rtc.h \
  Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_hal_rtc_ex.h \
- Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_system.h \
- Core/Inc/app_conf.h \
+ Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_system.h Core/Inc/i2c.h \
+ Core/Inc/main.h Core/Inc/app_conf.h \
  Middlewares/ST/STM32_WPAN/interface/patterns/ble_thread/hw.h \
  Core/Inc/hw_conf.h Core/Inc/hw_if.h \
  Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_exti.h \
@@ -50,9 +50,8 @@ build/sht41.o: Core/Src/sht41.c Core/Inc/sht41.h Core/Inc/main.h \
  Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_gpio.h \
  Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_rtc.h \
  Middlewares/ST/STM32_WPAN/ble/core/ble_bufsize.h Core/Inc/app_entry.h \
- Core/Inc/app_common.h Core/Inc/i2c.h
+ Core/Inc/app_common.h
 Core/Inc/sht41.h:
-Core/Inc/main.h:
 Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_hal.h:
 Core/Inc/stm32wbxx_hal_conf.h:
 Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_hal_dma.h:
@@ -91,6 +90,8 @@ Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_crs.h:
 Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_hal_rtc.h:
 Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_hal_rtc_ex.h:
 Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_system.h:
+Core/Inc/i2c.h:
+Core/Inc/main.h:
 Core/Inc/app_conf.h:
 Middlewares/ST/STM32_WPAN/interface/patterns/ble_thread/hw.h:
 Core/Inc/hw_conf.h:
@@ -109,4 +110,3 @@ Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_ll_rtc.h:
 Middlewares/ST/STM32_WPAN/ble/core/ble_bufsize.h:
 Core/Inc/app_entry.h:
 Core/Inc/app_common.h:
-Core/Inc/i2c.h:

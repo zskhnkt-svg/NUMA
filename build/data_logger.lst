@@ -1,0 +1,1411 @@
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 1
+
+
+   1              		.cpu cortex-m4
+   2              		.arch armv7e-m
+   3              		.fpu fpv4-sp-d16
+   4              		.eabi_attribute 27, 1
+   5              		.eabi_attribute 28, 1
+   6              		.eabi_attribute 20, 1
+   7              		.eabi_attribute 21, 1
+   8              		.eabi_attribute 23, 3
+   9              		.eabi_attribute 24, 1
+  10              		.eabi_attribute 25, 1
+  11              		.eabi_attribute 26, 1
+  12              		.eabi_attribute 30, 1
+  13              		.eabi_attribute 34, 1
+  14              		.eabi_attribute 18, 4
+  15              		.file	"data_logger.c"
+  16              		.text
+  17              	.Ltext0:
+  18              		.cfi_sections	.debug_frame
+  19              		.section	.text.DataLogger_Crc16,"ax",%progbits
+  20              		.align	1
+  21              		.syntax unified
+  22              		.thumb
+  23              		.thumb_func
+  25              	DataLogger_Crc16:
+  26              	.LVL0:
+  27              	.LFB1261:
+  28              		.file 1 "Core/Src/data_logger.c"
+   1:Core/Src/data_logger.c **** /**
+   2:Core/Src/data_logger.c ****  * @file data_logger.c
+   3:Core/Src/data_logger.c ****  * @brief Circular temperature journal in internal STM32WB Flash.
+   4:Core/Src/data_logger.c ****  */
+   5:Core/Src/data_logger.c **** 
+   6:Core/Src/data_logger.c **** #include "data_logger.h"
+   7:Core/Src/data_logger.c **** #include "stm32wbxx_hal.h"
+   8:Core/Src/data_logger.c **** 
+   9:Core/Src/data_logger.c **** #include <stddef.h>
+  10:Core/Src/data_logger.c **** #include <string.h>
+  11:Core/Src/data_logger.c **** 
+  12:Core/Src/data_logger.c **** #define DATA_LOG_MAGIC          0x544C4F47UL
+  13:Core/Src/data_logger.c **** #define DATA_LOG_FLASH_PAGE     4096U
+  14:Core/Src/data_logger.c **** #define DATA_LOG_RECORD_SIZE    32U
+  15:Core/Src/data_logger.c **** #define DATA_LOG_MAX_RECORDS    ((uint32_t)(((uint32_t)&__data_log_end - \
+  16:Core/Src/data_logger.c ****                                              (uint32_t)&__data_log_start) / \
+  17:Core/Src/data_logger.c ****                                             DATA_LOG_RECORD_SIZE))
+  18:Core/Src/data_logger.c **** 
+  19:Core/Src/data_logger.c **** extern uint8_t __data_log_start;
+  20:Core/Src/data_logger.c **** extern uint8_t __data_log_end;
+  21:Core/Src/data_logger.c **** 
+  22:Core/Src/data_logger.c **** typedef struct
+  23:Core/Src/data_logger.c **** {
+  24:Core/Src/data_logger.c ****     uint32_t magic;
+  25:Core/Src/data_logger.c ****     uint32_t sequence;
+  26:Core/Src/data_logger.c ****     uint32_t timestamp_seconds;
+  27:Core/Src/data_logger.c ****     int16_t  average_x100;
+  28:Core/Src/data_logger.c ****     int16_t  minimum_x100;
+  29:Core/Src/data_logger.c ****     int16_t  maximum_x100;
+  30:Core/Src/data_logger.c ****     uint16_t sample_count;
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 2
+
+
+  31:Core/Src/data_logger.c ****     uint16_t crc;
+  32:Core/Src/data_logger.c ****     uint16_t reserved;
+  33:Core/Src/data_logger.c ****     uint32_t reserved2;
+  34:Core/Src/data_logger.c ****     uint32_t reserved3[1];
+  35:Core/Src/data_logger.c **** } DataLogFlashRecord_t;
+  36:Core/Src/data_logger.c **** 
+  37:Core/Src/data_logger.c **** _Static_assert(sizeof(DataLogFlashRecord_t) == DATA_LOG_RECORD_SIZE,
+  38:Core/Src/data_logger.c ****                "DataLogFlashRecord_t must be 32 bytes");
+  39:Core/Src/data_logger.c **** 
+  40:Core/Src/data_logger.c **** static uint32_t s_write_index;
+  41:Core/Src/data_logger.c **** static uint32_t s_next_sequence;
+  42:Core/Src/data_logger.c **** static uint32_t s_record_count;
+  43:Core/Src/data_logger.c **** static uint8_t s_initialized;
+  44:Core/Src/data_logger.c **** 
+  45:Core/Src/data_logger.c **** static uint16_t DataLogger_Crc16(const uint8_t *data, size_t length)
+  46:Core/Src/data_logger.c **** {
+  29              		.loc 1 46 1 view -0
+  30              		.cfi_startproc
+  31              		@ args = 0, pretend = 0, frame = 0
+  32              		@ frame_needed = 0, uses_anonymous_args = 0
+  33              		@ link register save eliminated.
+  34              		.loc 1 46 1 is_stmt 0 view .LVU1
+  35 0000 8446     		mov	ip, r0
+  47:Core/Src/data_logger.c ****     uint16_t crc = 0xFFFFU;
+  36              		.loc 1 47 5 is_stmt 1 view .LVU2
+  37              	.LVL1:
+  48:Core/Src/data_logger.c **** 
+  49:Core/Src/data_logger.c ****     while (length-- != 0U)
+  38              		.loc 1 49 5 view .LVU3
+  47:Core/Src/data_logger.c ****     uint16_t crc = 0xFFFFU;
+  39              		.loc 1 47 14 is_stmt 0 view .LVU4
+  40 0002 4FF6FF70 		movw	r0, #65535
+  41              	.LVL2:
+  42              	.L2:
+  43              		.loc 1 49 11 is_stmt 1 view .LVU5
+  44 0006 0B46     		mov	r3, r1
+  45              		.loc 1 49 18 is_stmt 0 view .LVU6
+  46 0008 0139     		subs	r1, r1, #1
+  47              	.LVL3:
+  48              		.loc 1 49 11 view .LVU7
+  49 000a 8BB1     		cbz	r3, .L8
+  50:Core/Src/data_logger.c ****     {
+  51:Core/Src/data_logger.c ****         crc ^= *data++;
+  50              		.loc 1 51 9 is_stmt 1 view .LVU8
+  51              	.LVL4:
+  52              		.loc 1 51 16 is_stmt 0 view .LVU9
+  53 000c 1CF8013B 		ldrb	r3, [ip], #1	@ zero_extendqisi2
+  54              	.LVL5:
+  55              		.loc 1 51 13 view .LVU10
+  56 0010 5840     		eors	r0, r0, r3
+  57              	.LVL6:
+  52:Core/Src/data_logger.c ****         for (uint8_t bit = 0U; bit < 8U; ++bit)
+  58              		.loc 1 52 9 is_stmt 1 view .LVU11
+  59              	.LBB2:
+  60              		.loc 1 52 14 view .LVU12
+  61              		.loc 1 52 22 is_stmt 0 view .LVU13
+  62 0012 0023     		movs	r3, #0
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 3
+
+
+  63              		.loc 1 52 9 view .LVU14
+  64 0014 02E0     		b	.L3
+  65              	.LVL7:
+  66              	.L4:
+  53:Core/Src/data_logger.c ****         {
+  54:Core/Src/data_logger.c ****             crc = (crc & 1U) ? (uint16_t)((crc >> 1U) ^ 0xA001U)
+  67              		.loc 1 54 17 discriminator 2 view .LVU15
+  68 0016 4008     		lsrs	r0, r0, #1
+  69              	.LVL8:
+  70              	.L5:
+  52:Core/Src/data_logger.c ****         for (uint8_t bit = 0U; bit < 8U; ++bit)
+  71              		.loc 1 52 42 is_stmt 1 discriminator 4 view .LVU16
+  72 0018 0133     		adds	r3, r3, #1
+  73              	.LVL9:
+  52:Core/Src/data_logger.c ****         for (uint8_t bit = 0U; bit < 8U; ++bit)
+  74              		.loc 1 52 42 is_stmt 0 discriminator 4 view .LVU17
+  75 001a DBB2     		uxtb	r3, r3
+  76              	.LVL10:
+  77              	.L3:
+  52:Core/Src/data_logger.c ****         for (uint8_t bit = 0U; bit < 8U; ++bit)
+  78              		.loc 1 52 32 is_stmt 1 discriminator 2 view .LVU18
+  52:Core/Src/data_logger.c ****         for (uint8_t bit = 0U; bit < 8U; ++bit)
+  79              		.loc 1 52 9 is_stmt 0 discriminator 2 view .LVU19
+  80 001c 072B     		cmp	r3, #7
+  81 001e F2D8     		bhi	.L2
+  82              		.loc 1 54 13 is_stmt 1 view .LVU20
+  83              		.loc 1 54 17 is_stmt 0 view .LVU21
+  84 0020 10F0010F 		tst	r0, #1
+  85 0024 F7D0     		beq	.L4
+  86              		.loc 1 54 17 discriminator 1 view .LVU22
+  87 0026 4AF20102 		movw	r2, #40961
+  88 002a 82EA5000 		eor	r0, r2, r0, lsr #1
+  89              	.LVL11:
+  90              		.loc 1 54 17 discriminator 1 view .LVU23
+  91 002e F3E7     		b	.L5
+  92              	.LVL12:
+  93              	.L8:
+  94              		.loc 1 54 17 discriminator 1 view .LVU24
+  95              	.LBE2:
+  55:Core/Src/data_logger.c ****                               : (uint16_t)(crc >> 1U);
+  56:Core/Src/data_logger.c ****         }
+  57:Core/Src/data_logger.c ****     }
+  58:Core/Src/data_logger.c **** 
+  59:Core/Src/data_logger.c ****     return crc;
+  96              		.loc 1 59 5 is_stmt 1 view .LVU25
+  60:Core/Src/data_logger.c **** }
+  97              		.loc 1 60 1 is_stmt 0 view .LVU26
+  98 0030 7047     		bx	lr
+  99              		.cfi_endproc
+ 100              	.LFE1261:
+ 102              		.section	.text.DataLogger_Address,"ax",%progbits
+ 103              		.align	1
+ 104              		.syntax unified
+ 105              		.thumb
+ 106              		.thumb_func
+ 108              	DataLogger_Address:
+ 109              	.LVL13:
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 4
+
+
+ 110              	.LFB1262:
+  61:Core/Src/data_logger.c **** 
+  62:Core/Src/data_logger.c **** static uint32_t DataLogger_Address(uint32_t index)
+  63:Core/Src/data_logger.c **** {
+ 111              		.loc 1 63 1 is_stmt 1 view -0
+ 112              		.cfi_startproc
+ 113              		@ args = 0, pretend = 0, frame = 0
+ 114              		@ frame_needed = 0, uses_anonymous_args = 0
+ 115              		@ link register save eliminated.
+  64:Core/Src/data_logger.c ****     return (uint32_t)&__data_log_start + index * DATA_LOG_RECORD_SIZE;
+ 116              		.loc 1 64 5 view .LVU28
+  65:Core/Src/data_logger.c **** }
+ 117              		.loc 1 65 1 is_stmt 0 view .LVU29
+ 118 0000 014B     		ldr	r3, .L10
+ 119 0002 03EB4010 		add	r0, r3, r0, lsl #5
+ 120              	.LVL14:
+ 121              		.loc 1 65 1 view .LVU30
+ 122 0006 7047     		bx	lr
+ 123              	.L11:
+ 124              		.align	2
+ 125              	.L10:
+ 126 0008 00000000 		.word	__data_log_start
+ 127              		.cfi_endproc
+ 128              	.LFE1262:
+ 130              		.section	.text.DataLogger_IsEmpty,"ax",%progbits
+ 131              		.align	1
+ 132              		.syntax unified
+ 133              		.thumb
+ 134              		.thumb_func
+ 136              	DataLogger_IsEmpty:
+ 137              	.LVL15:
+ 138              	.LFB1263:
+  66:Core/Src/data_logger.c **** 
+  67:Core/Src/data_logger.c **** static uint8_t DataLogger_IsEmpty(uint32_t address)
+  68:Core/Src/data_logger.c **** {
+ 139              		.loc 1 68 1 is_stmt 1 view -0
+ 140              		.cfi_startproc
+ 141              		@ args = 0, pretend = 0, frame = 0
+ 142              		@ frame_needed = 0, uses_anonymous_args = 0
+ 143              		@ link register save eliminated.
+  69:Core/Src/data_logger.c ****     const uint32_t *words = (const uint32_t *)address;
+ 144              		.loc 1 69 5 view .LVU32
+  70:Core/Src/data_logger.c **** 
+  71:Core/Src/data_logger.c ****     for (uint8_t index = 0U; index < 8U; ++index)
+ 145              		.loc 1 71 5 view .LVU33
+ 146              	.LBB3:
+ 147              		.loc 1 71 10 view .LVU34
+ 148              		.loc 1 71 18 is_stmt 0 view .LVU35
+ 149 0000 0023     		movs	r3, #0
+ 150              	.LVL16:
+ 151              	.L13:
+ 152              		.loc 1 71 30 is_stmt 1 discriminator 1 view .LVU36
+ 153              		.loc 1 71 5 is_stmt 0 discriminator 1 view .LVU37
+ 154 0002 072B     		cmp	r3, #7
+ 155 0004 07D8     		bhi	.L17
+  72:Core/Src/data_logger.c ****     {
+  73:Core/Src/data_logger.c ****         if (words[index] != 0xFFFFFFFFUL)
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 5
+
+
+ 156              		.loc 1 73 9 is_stmt 1 view .LVU38
+ 157              		.loc 1 73 18 is_stmt 0 view .LVU39
+ 158 0006 50F82320 		ldr	r2, [r0, r3, lsl #2]
+ 159              		.loc 1 73 12 view .LVU40
+ 160 000a B2F1FF3F 		cmp	r2, #-1
+ 161 000e 04D1     		bne	.L16
+  71:Core/Src/data_logger.c ****     {
+ 162              		.loc 1 71 42 is_stmt 1 discriminator 2 view .LVU41
+ 163 0010 0133     		adds	r3, r3, #1
+ 164              	.LVL17:
+  71:Core/Src/data_logger.c ****     {
+ 165              		.loc 1 71 42 is_stmt 0 discriminator 2 view .LVU42
+ 166 0012 DBB2     		uxtb	r3, r3
+ 167              	.LVL18:
+  71:Core/Src/data_logger.c ****     {
+ 168              		.loc 1 71 42 discriminator 2 view .LVU43
+ 169 0014 F5E7     		b	.L13
+ 170              	.L17:
+  71:Core/Src/data_logger.c ****     {
+ 171              		.loc 1 71 42 discriminator 2 view .LVU44
+ 172              	.LBE3:
+  74:Core/Src/data_logger.c ****         {
+  75:Core/Src/data_logger.c ****             return 0U;
+  76:Core/Src/data_logger.c ****         }
+  77:Core/Src/data_logger.c ****     }
+  78:Core/Src/data_logger.c **** 
+  79:Core/Src/data_logger.c ****     return 1U;
+ 173              		.loc 1 79 12 view .LVU45
+ 174 0016 0120     		movs	r0, #1
+ 175              	.LVL19:
+ 176              	.LBB4:
+ 177              		.loc 1 79 12 view .LVU46
+ 178 0018 7047     		bx	lr
+ 179              	.LVL20:
+ 180              	.L16:
+  75:Core/Src/data_logger.c ****         }
+ 181              		.loc 1 75 20 view .LVU47
+ 182 001a 0020     		movs	r0, #0
+ 183              	.LVL21:
+  75:Core/Src/data_logger.c ****         }
+ 184              		.loc 1 75 20 view .LVU48
+ 185              	.LBE4:
+  80:Core/Src/data_logger.c **** }
+ 186              		.loc 1 80 1 view .LVU49
+ 187 001c 7047     		bx	lr
+ 188              		.cfi_endproc
+ 189              	.LFE1263:
+ 191              		.section	.text.DataLogger_IsValid,"ax",%progbits
+ 192              		.align	1
+ 193              		.syntax unified
+ 194              		.thumb
+ 195              		.thumb_func
+ 197              	DataLogger_IsValid:
+ 198              	.LVL22:
+ 199              	.LFB1264:
+  81:Core/Src/data_logger.c **** 
+  82:Core/Src/data_logger.c **** static uint8_t DataLogger_IsValid(const DataLogFlashRecord_t *record)
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 6
+
+
+  83:Core/Src/data_logger.c **** {
+ 200              		.loc 1 83 1 is_stmt 1 view -0
+ 201              		.cfi_startproc
+ 202              		@ args = 0, pretend = 0, frame = 0
+ 203              		@ frame_needed = 0, uses_anonymous_args = 0
+  84:Core/Src/data_logger.c ****     if (record->magic != DATA_LOG_MAGIC || record->sample_count == 0U)
+ 204              		.loc 1 84 5 view .LVU51
+ 205              		.loc 1 84 15 is_stmt 0 view .LVU52
+ 206 0000 0268     		ldr	r2, [r0]
+ 207              		.loc 1 84 8 view .LVU53
+ 208 0002 094B     		ldr	r3, .L26
+ 209 0004 9A42     		cmp	r2, r3
+ 210 0006 0BD1     		bne	.L20
+ 211              		.loc 1 84 50 discriminator 1 view .LVU54
+ 212 0008 438A     		ldrh	r3, [r0, #18]
+ 213              		.loc 1 84 41 discriminator 1 view .LVU55
+ 214 000a 5BB1     		cbz	r3, .L21
+  83:Core/Src/data_logger.c ****     if (record->magic != DATA_LOG_MAGIC || record->sample_count == 0U)
+ 215              		.loc 1 83 1 view .LVU56
+ 216 000c 10B5     		push	{r4, lr}
+ 217              	.LCFI0:
+ 218              		.cfi_def_cfa_offset 8
+ 219              		.cfi_offset 4, -8
+ 220              		.cfi_offset 14, -4
+  85:Core/Src/data_logger.c ****     {
+  86:Core/Src/data_logger.c ****         return 0U;
+  87:Core/Src/data_logger.c ****     }
+  88:Core/Src/data_logger.c **** 
+  89:Core/Src/data_logger.c ****     return record->crc == DataLogger_Crc16((const uint8_t *)record,
+ 221              		.loc 1 89 5 is_stmt 1 view .LVU57
+ 222              		.loc 1 89 18 is_stmt 0 view .LVU58
+ 223 000e 848A     		ldrh	r4, [r0, #20]
+ 224              		.loc 1 89 27 view .LVU59
+ 225 0010 1421     		movs	r1, #20
+ 226 0012 FFF7FEFF 		bl	DataLogger_Crc16
+ 227              	.LVL23:
+ 228              		.loc 1 89 24 view .LVU60
+ 229 0016 8442     		cmp	r4, r0
+ 230 0018 14BF     		ite	ne
+ 231 001a 0020     		movne	r0, #0
+ 232 001c 0120     		moveq	r0, #1
+  90:Core/Src/data_logger.c ****                                            offsetof(DataLogFlashRecord_t, crc));
+  91:Core/Src/data_logger.c **** }
+ 233              		.loc 1 91 1 view .LVU61
+ 234 001e 10BD     		pop	{r4, pc}
+ 235              	.LVL24:
+ 236              	.L20:
+ 237              	.LCFI1:
+ 238              		.cfi_def_cfa_offset 0
+ 239              		.cfi_restore 4
+ 240              		.cfi_restore 14
+  86:Core/Src/data_logger.c ****     }
+ 241              		.loc 1 86 16 view .LVU62
+ 242 0020 0020     		movs	r0, #0
+ 243              	.LVL25:
+  86:Core/Src/data_logger.c ****     }
+ 244              		.loc 1 86 16 view .LVU63
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 7
+
+
+ 245 0022 7047     		bx	lr
+ 246              	.LVL26:
+ 247              	.L21:
+  86:Core/Src/data_logger.c ****     }
+ 248              		.loc 1 86 16 view .LVU64
+ 249 0024 0020     		movs	r0, #0
+ 250              	.LVL27:
+ 251              		.loc 1 91 1 view .LVU65
+ 252 0026 7047     		bx	lr
+ 253              	.L27:
+ 254              		.align	2
+ 255              	.L26:
+ 256 0028 474F4C54 		.word	1414287175
+ 257              		.cfi_endproc
+ 258              	.LFE1264:
+ 260              		.section	.text.DataLogger_EraseAll,"ax",%progbits
+ 261              		.align	1
+ 262              		.syntax unified
+ 263              		.thumb
+ 264              		.thumb_func
+ 266              	DataLogger_EraseAll:
+ 267              	.LFB1265:
+  92:Core/Src/data_logger.c **** 
+  93:Core/Src/data_logger.c **** static HAL_StatusTypeDef DataLogger_EraseAll(void)
+  94:Core/Src/data_logger.c **** {
+ 268              		.loc 1 94 1 is_stmt 1 view -0
+ 269              		.cfi_startproc
+ 270              		@ args = 0, pretend = 0, frame = 16
+ 271              		@ frame_needed = 0, uses_anonymous_args = 0
+ 272 0000 10B5     		push	{r4, lr}
+ 273              	.LCFI2:
+ 274              		.cfi_def_cfa_offset 8
+ 275              		.cfi_offset 4, -8
+ 276              		.cfi_offset 14, -4
+ 277 0002 84B0     		sub	sp, sp, #16
+ 278              	.LCFI3:
+ 279              		.cfi_def_cfa_offset 24
+  95:Core/Src/data_logger.c ****     FLASH_EraseInitTypeDef erase = {0};
+ 280              		.loc 1 95 5 view .LVU67
+ 281              		.loc 1 95 28 is_stmt 0 view .LVU68
+ 282 0004 0023     		movs	r3, #0
+ 283 0006 0193     		str	r3, [sp, #4]
+ 284 0008 0293     		str	r3, [sp, #8]
+ 285 000a 0393     		str	r3, [sp, #12]
+  96:Core/Src/data_logger.c ****     uint32_t page_error = 0U;
+ 286              		.loc 1 96 5 is_stmt 1 view .LVU69
+ 287              		.loc 1 96 14 is_stmt 0 view .LVU70
+ 288 000c 0093     		str	r3, [sp]
+  97:Core/Src/data_logger.c ****     uint32_t first_page = ((uint32_t)&__data_log_start - FLASH_BASE) /
+ 289              		.loc 1 97 5 is_stmt 1 view .LVU71
+ 290              		.loc 1 97 28 is_stmt 0 view .LVU72
+ 291 000e 0B49     		ldr	r1, .L30
+ 292              		.loc 1 97 56 view .LVU73
+ 293 0010 01F17842 		add	r2, r1, #-134217728
+ 294              		.loc 1 97 14 view .LVU74
+ 295 0014 120B     		lsrs	r2, r2, #12
+ 296              	.LVL28:
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 8
+
+
+  98:Core/Src/data_logger.c ****                           DATA_LOG_FLASH_PAGE;
+  99:Core/Src/data_logger.c ****     uint32_t page_count = ((uint32_t)&__data_log_end -
+ 297              		.loc 1 99 5 is_stmt 1 view .LVU75
+ 298              		.loc 1 99 28 is_stmt 0 view .LVU76
+ 299 0016 0A4B     		ldr	r3, .L30+4
+ 300              		.loc 1 99 54 view .LVU77
+ 301 0018 5B1A     		subs	r3, r3, r1
+ 302              		.loc 1 99 14 view .LVU78
+ 303 001a 1B0B     		lsrs	r3, r3, #12
+ 304              	.LVL29:
+ 100:Core/Src/data_logger.c ****                            (uint32_t)&__data_log_start) /
+ 101:Core/Src/data_logger.c ****                           DATA_LOG_FLASH_PAGE;
+ 102:Core/Src/data_logger.c ****     HAL_StatusTypeDef status;
+ 305              		.loc 1 102 5 is_stmt 1 view .LVU79
+ 103:Core/Src/data_logger.c **** 
+ 104:Core/Src/data_logger.c ****     erase.TypeErase = FLASH_TYPEERASE_PAGES;
+ 306              		.loc 1 104 5 view .LVU80
+ 307              		.loc 1 104 21 is_stmt 0 view .LVU81
+ 308 001c 0221     		movs	r1, #2
+ 309 001e 0191     		str	r1, [sp, #4]
+ 105:Core/Src/data_logger.c ****     erase.Page = first_page;
+ 310              		.loc 1 105 5 is_stmt 1 view .LVU82
+ 311              		.loc 1 105 16 is_stmt 0 view .LVU83
+ 312 0020 0292     		str	r2, [sp, #8]
+ 106:Core/Src/data_logger.c ****     erase.NbPages = page_count;
+ 313              		.loc 1 106 5 is_stmt 1 view .LVU84
+ 314              		.loc 1 106 19 is_stmt 0 view .LVU85
+ 315 0022 0393     		str	r3, [sp, #12]
+ 107:Core/Src/data_logger.c **** 
+ 108:Core/Src/data_logger.c ****     HAL_FLASH_Unlock();
+ 316              		.loc 1 108 5 is_stmt 1 view .LVU86
+ 317 0024 FFF7FEFF 		bl	HAL_FLASH_Unlock
+ 318              	.LVL30:
+ 109:Core/Src/data_logger.c ****     status = HAL_FLASHEx_Erase(&erase, &page_error);
+ 319              		.loc 1 109 5 view .LVU87
+ 320              		.loc 1 109 14 is_stmt 0 view .LVU88
+ 321 0028 6946     		mov	r1, sp
+ 322 002a 01A8     		add	r0, sp, #4
+ 323 002c FFF7FEFF 		bl	HAL_FLASHEx_Erase
+ 324              	.LVL31:
+ 325 0030 0446     		mov	r4, r0
+ 326              	.LVL32:
+ 110:Core/Src/data_logger.c ****     HAL_FLASH_Lock();
+ 327              		.loc 1 110 5 is_stmt 1 view .LVU89
+ 328 0032 FFF7FEFF 		bl	HAL_FLASH_Lock
+ 329              	.LVL33:
+ 111:Core/Src/data_logger.c **** 
+ 112:Core/Src/data_logger.c ****     return status;
+ 330              		.loc 1 112 5 view .LVU90
+ 113:Core/Src/data_logger.c **** }
+ 331              		.loc 1 113 1 is_stmt 0 view .LVU91
+ 332 0036 2046     		mov	r0, r4
+ 333 0038 04B0     		add	sp, sp, #16
+ 334              	.LCFI4:
+ 335              		.cfi_def_cfa_offset 8
+ 336              		@ sp needed
+ 337 003a 10BD     		pop	{r4, pc}
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 9
+
+
+ 338              	.LVL34:
+ 339              	.L31:
+ 340              		.loc 1 113 1 view .LVU92
+ 341              		.align	2
+ 342              	.L30:
+ 343 003c 00000000 		.word	__data_log_start
+ 344 0040 00000000 		.word	__data_log_end
+ 345              		.cfi_endproc
+ 346              	.LFE1265:
+ 348              		.section	.text.DataLogger_Init,"ax",%progbits
+ 349              		.align	1
+ 350              		.global	DataLogger_Init
+ 351              		.syntax unified
+ 352              		.thumb
+ 353              		.thumb_func
+ 355              	DataLogger_Init:
+ 356              	.LFB1266:
+ 114:Core/Src/data_logger.c **** 
+ 115:Core/Src/data_logger.c **** HAL_StatusTypeDef DataLogger_Init(void)
+ 116:Core/Src/data_logger.c **** {
+ 357              		.loc 1 116 1 is_stmt 1 view -0
+ 358              		.cfi_startproc
+ 359              		@ args = 0, pretend = 0, frame = 0
+ 360              		@ frame_needed = 0, uses_anonymous_args = 0
+ 361 0000 2DE9F843 		push	{r3, r4, r5, r6, r7, r8, r9, lr}
+ 362              	.LCFI5:
+ 363              		.cfi_def_cfa_offset 32
+ 364              		.cfi_offset 3, -32
+ 365              		.cfi_offset 4, -28
+ 366              		.cfi_offset 5, -24
+ 367              		.cfi_offset 6, -20
+ 368              		.cfi_offset 7, -16
+ 369              		.cfi_offset 8, -12
+ 370              		.cfi_offset 9, -8
+ 371              		.cfi_offset 14, -4
+ 117:Core/Src/data_logger.c ****     const DataLogFlashRecord_t *record;
+ 372              		.loc 1 117 5 view .LVU94
+ 118:Core/Src/data_logger.c ****     uint32_t newest_index = 0U;
+ 373              		.loc 1 118 5 view .LVU95
+ 374              	.LVL35:
+ 119:Core/Src/data_logger.c ****     uint32_t newest_sequence = 0U;
+ 375              		.loc 1 119 5 view .LVU96
+ 120:Core/Src/data_logger.c ****     uint32_t valid_count = 0U;
+ 376              		.loc 1 120 5 view .LVU97
+ 121:Core/Src/data_logger.c ****     uint8_t found = 0U;
+ 377              		.loc 1 121 5 view .LVU98
+ 122:Core/Src/data_logger.c **** 
+ 123:Core/Src/data_logger.c ****     for (uint32_t index = 0U; index < DATA_LOG_MAX_RECORDS; ++index)
+ 378              		.loc 1 123 5 view .LVU99
+ 379              	.LBB5:
+ 380              		.loc 1 123 10 view .LVU100
+ 381              		.loc 1 123 19 is_stmt 0 view .LVU101
+ 382 0004 0024     		movs	r4, #0
+ 383              	.LBE5:
+ 121:Core/Src/data_logger.c ****     uint8_t found = 0U;
+ 384              		.loc 1 121 13 view .LVU102
+ 385 0006 2546     		mov	r5, r4
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 10
+
+
+ 120:Core/Src/data_logger.c ****     uint8_t found = 0U;
+ 386              		.loc 1 120 14 view .LVU103
+ 387 0008 2646     		mov	r6, r4
+ 119:Core/Src/data_logger.c ****     uint32_t valid_count = 0U;
+ 388              		.loc 1 119 14 view .LVU104
+ 389 000a 2746     		mov	r7, r4
+ 118:Core/Src/data_logger.c ****     uint32_t newest_sequence = 0U;
+ 390              		.loc 1 118 14 view .LVU105
+ 391 000c A046     		mov	r8, r4
+ 392              	.LBB6:
+ 393              		.loc 1 123 5 view .LVU106
+ 394 000e 04E0     		b	.L33
+ 395              	.LVL36:
+ 396              	.L35:
+ 124:Core/Src/data_logger.c ****     {
+ 125:Core/Src/data_logger.c ****         record = (const DataLogFlashRecord_t *)DataLogger_Address(index);
+ 126:Core/Src/data_logger.c ****         if (DataLogger_IsValid(record))
+ 127:Core/Src/data_logger.c ****         {
+ 128:Core/Src/data_logger.c ****             ++valid_count;
+ 129:Core/Src/data_logger.c ****             if (!found || record->sequence > newest_sequence)
+ 130:Core/Src/data_logger.c ****             {
+ 131:Core/Src/data_logger.c ****                 found = 1U;
+ 397              		.loc 1 131 17 is_stmt 1 view .LVU107
+ 132:Core/Src/data_logger.c ****                 newest_sequence = record->sequence;
+ 398              		.loc 1 132 17 view .LVU108
+ 399              		.loc 1 132 33 is_stmt 0 view .LVU109
+ 400 0010 D9F80470 		ldr	r7, [r9, #4]
+ 401              	.LVL37:
+ 133:Core/Src/data_logger.c ****                 newest_index = index;
+ 402              		.loc 1 133 17 is_stmt 1 view .LVU110
+ 403              		.loc 1 133 30 is_stmt 0 view .LVU111
+ 404 0014 A046     		mov	r8, r4
+ 131:Core/Src/data_logger.c ****                 newest_sequence = record->sequence;
+ 405              		.loc 1 131 23 view .LVU112
+ 406 0016 0125     		movs	r5, #1
+ 407              	.LVL38:
+ 408              	.L34:
+ 123:Core/Src/data_logger.c ****     {
+ 409              		.loc 1 123 61 is_stmt 1 discriminator 2 view .LVU113
+ 410 0018 0134     		adds	r4, r4, #1
+ 411              	.LVL39:
+ 412              	.L33:
+ 123:Core/Src/data_logger.c ****     {
+ 413              		.loc 1 123 31 discriminator 1 view .LVU114
+ 123:Core/Src/data_logger.c ****     {
+ 414              		.loc 1 123 39 is_stmt 0 discriminator 1 view .LVU115
+ 415 001a 224B     		ldr	r3, .L43
+ 416 001c 224A     		ldr	r2, .L43+4
+ 417 001e 9B1A     		subs	r3, r3, r2
+ 418 0020 5A09     		lsrs	r2, r3, #5
+ 123:Core/Src/data_logger.c ****     {
+ 419              		.loc 1 123 5 discriminator 1 view .LVU116
+ 420 0022 B4EB531F 		cmp	r4, r3, lsr #5
+ 421 0026 0FD2     		bcs	.L42
+ 125:Core/Src/data_logger.c ****         if (DataLogger_IsValid(record))
+ 422              		.loc 1 125 9 is_stmt 1 view .LVU117
+ 125:Core/Src/data_logger.c ****         if (DataLogger_IsValid(record))
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 11
+
+
+ 423              		.loc 1 125 48 is_stmt 0 view .LVU118
+ 424 0028 2046     		mov	r0, r4
+ 425 002a FFF7FEFF 		bl	DataLogger_Address
+ 426              	.LVL40:
+ 427 002e 8146     		mov	r9, r0
+ 428              	.LVL41:
+ 126:Core/Src/data_logger.c ****         {
+ 429              		.loc 1 126 9 is_stmt 1 view .LVU119
+ 126:Core/Src/data_logger.c ****         {
+ 430              		.loc 1 126 13 is_stmt 0 view .LVU120
+ 431 0030 FFF7FEFF 		bl	DataLogger_IsValid
+ 432              	.LVL42:
+ 126:Core/Src/data_logger.c ****         {
+ 433              		.loc 1 126 12 view .LVU121
+ 434 0034 0028     		cmp	r0, #0
+ 435 0036 EFD0     		beq	.L34
+ 128:Core/Src/data_logger.c ****             if (!found || record->sequence > newest_sequence)
+ 436              		.loc 1 128 13 is_stmt 1 view .LVU122
+ 437 0038 0136     		adds	r6, r6, #1
+ 438              	.LVL43:
+ 129:Core/Src/data_logger.c ****             {
+ 439              		.loc 1 129 13 view .LVU123
+ 129:Core/Src/data_logger.c ****             {
+ 440              		.loc 1 129 16 is_stmt 0 view .LVU124
+ 441 003a 002D     		cmp	r5, #0
+ 442 003c E8D0     		beq	.L35
+ 129:Core/Src/data_logger.c ****             {
+ 443              		.loc 1 129 33 discriminator 1 view .LVU125
+ 444 003e D9F80430 		ldr	r3, [r9, #4]
+ 129:Core/Src/data_logger.c ****             {
+ 445              		.loc 1 129 24 discriminator 1 view .LVU126
+ 446 0042 BB42     		cmp	r3, r7
+ 447 0044 E8D9     		bls	.L34
+ 448 0046 E3E7     		b	.L35
+ 449              	.LVL44:
+ 450              	.L42:
+ 129:Core/Src/data_logger.c ****             {
+ 451              		.loc 1 129 24 discriminator 1 view .LVU127
+ 452              	.LBE6:
+ 134:Core/Src/data_logger.c ****             }
+ 135:Core/Src/data_logger.c ****         }
+ 136:Core/Src/data_logger.c ****     }
+ 137:Core/Src/data_logger.c **** 
+ 138:Core/Src/data_logger.c ****     if (!found)
+ 453              		.loc 1 138 5 is_stmt 1 view .LVU128
+ 454              		.loc 1 138 8 is_stmt 0 view .LVU129
+ 455 0048 6DB9     		cbnz	r5, .L37
+ 139:Core/Src/data_logger.c ****     {
+ 140:Core/Src/data_logger.c ****         s_write_index = 0U;
+ 456              		.loc 1 140 9 is_stmt 1 view .LVU130
+ 457              		.loc 1 140 23 is_stmt 0 view .LVU131
+ 458 004a 0023     		movs	r3, #0
+ 459 004c 174A     		ldr	r2, .L43+8
+ 460 004e 1360     		str	r3, [r2]
+ 141:Core/Src/data_logger.c ****         s_next_sequence = 0U;
+ 461              		.loc 1 141 9 is_stmt 1 view .LVU132
+ 462              		.loc 1 141 25 is_stmt 0 view .LVU133
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 12
+
+
+ 463 0050 174A     		ldr	r2, .L43+12
+ 464 0052 1360     		str	r3, [r2]
+ 465              	.LVL45:
+ 466              	.L38:
+ 142:Core/Src/data_logger.c ****     }
+ 143:Core/Src/data_logger.c ****     else
+ 144:Core/Src/data_logger.c ****     {
+ 145:Core/Src/data_logger.c ****         s_write_index = newest_index + 1U;
+ 146:Core/Src/data_logger.c ****         s_next_sequence = newest_sequence + 1U;
+ 147:Core/Src/data_logger.c **** 
+ 148:Core/Src/data_logger.c ****         if (s_write_index >= DATA_LOG_MAX_RECORDS)
+ 149:Core/Src/data_logger.c ****         {
+ 150:Core/Src/data_logger.c ****             s_write_index = 0U;
+ 151:Core/Src/data_logger.c ****         }
+ 152:Core/Src/data_logger.c **** 
+ 153:Core/Src/data_logger.c ****         if (!DataLogger_IsEmpty(DataLogger_Address(s_write_index)))
+ 154:Core/Src/data_logger.c ****         {
+ 155:Core/Src/data_logger.c ****             if (DataLogger_EraseAll() != HAL_OK)
+ 156:Core/Src/data_logger.c ****             {
+ 157:Core/Src/data_logger.c ****                 return HAL_ERROR;
+ 158:Core/Src/data_logger.c ****             }
+ 159:Core/Src/data_logger.c ****             s_write_index = 0U;
+ 160:Core/Src/data_logger.c ****             s_next_sequence = 0U;
+ 161:Core/Src/data_logger.c ****             valid_count = 0U;
+ 162:Core/Src/data_logger.c ****         }
+ 163:Core/Src/data_logger.c ****     }
+ 164:Core/Src/data_logger.c **** 
+ 165:Core/Src/data_logger.c ****     s_record_count = valid_count;
+ 467              		.loc 1 165 5 is_stmt 1 view .LVU134
+ 468              		.loc 1 165 20 is_stmt 0 view .LVU135
+ 469 0054 174B     		ldr	r3, .L43+16
+ 470 0056 1E60     		str	r6, [r3]
+ 166:Core/Src/data_logger.c ****     s_initialized = 1U;
+ 471              		.loc 1 166 5 is_stmt 1 view .LVU136
+ 472              		.loc 1 166 19 is_stmt 0 view .LVU137
+ 473 0058 174B     		ldr	r3, .L43+20
+ 474 005a 0122     		movs	r2, #1
+ 475 005c 1A70     		strb	r2, [r3]
+ 167:Core/Src/data_logger.c ****     return HAL_OK;
+ 476              		.loc 1 167 5 is_stmt 1 view .LVU138
+ 477              		.loc 1 167 12 is_stmt 0 view .LVU139
+ 478 005e 0025     		movs	r5, #0
+ 479              	.LVL46:
+ 480              	.L40:
+ 168:Core/Src/data_logger.c **** }
+ 481              		.loc 1 168 1 view .LVU140
+ 482 0060 2846     		mov	r0, r5
+ 483 0062 BDE8F883 		pop	{r3, r4, r5, r6, r7, r8, r9, pc}
+ 484              	.LVL47:
+ 485              	.L37:
+ 145:Core/Src/data_logger.c ****         s_next_sequence = newest_sequence + 1U;
+ 486              		.loc 1 145 9 is_stmt 1 view .LVU141
+ 145:Core/Src/data_logger.c ****         s_next_sequence = newest_sequence + 1U;
+ 487              		.loc 1 145 38 is_stmt 0 view .LVU142
+ 488 0066 08F10103 		add	r3, r8, #1
+ 145:Core/Src/data_logger.c ****         s_next_sequence = newest_sequence + 1U;
+ 489              		.loc 1 145 23 view .LVU143
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 13
+
+
+ 490 006a 1049     		ldr	r1, .L43+8
+ 491 006c 0B60     		str	r3, [r1]
+ 146:Core/Src/data_logger.c **** 
+ 492              		.loc 1 146 9 is_stmt 1 view .LVU144
+ 146:Core/Src/data_logger.c **** 
+ 493              		.loc 1 146 43 is_stmt 0 view .LVU145
+ 494 006e 0137     		adds	r7, r7, #1
+ 495              	.LVL48:
+ 146:Core/Src/data_logger.c **** 
+ 496              		.loc 1 146 25 view .LVU146
+ 497 0070 0F49     		ldr	r1, .L43+12
+ 498 0072 0F60     		str	r7, [r1]
+ 148:Core/Src/data_logger.c ****         {
+ 499              		.loc 1 148 9 is_stmt 1 view .LVU147
+ 148:Core/Src/data_logger.c ****         {
+ 500              		.loc 1 148 12 is_stmt 0 view .LVU148
+ 501 0074 9A42     		cmp	r2, r3
+ 502 0076 02D8     		bhi	.L39
+ 150:Core/Src/data_logger.c ****         }
+ 503              		.loc 1 150 13 is_stmt 1 view .LVU149
+ 150:Core/Src/data_logger.c ****         }
+ 504              		.loc 1 150 27 is_stmt 0 view .LVU150
+ 505 0078 0C4B     		ldr	r3, .L43+8
+ 506 007a 0022     		movs	r2, #0
+ 507 007c 1A60     		str	r2, [r3]
+ 508              	.L39:
+ 153:Core/Src/data_logger.c ****         {
+ 509              		.loc 1 153 9 is_stmt 1 view .LVU151
+ 153:Core/Src/data_logger.c ****         {
+ 510              		.loc 1 153 14 is_stmt 0 view .LVU152
+ 511 007e 0B4B     		ldr	r3, .L43+8
+ 512 0080 1868     		ldr	r0, [r3]
+ 513 0082 FFF7FEFF 		bl	DataLogger_Address
+ 514              	.LVL49:
+ 515 0086 FFF7FEFF 		bl	DataLogger_IsEmpty
+ 516              	.LVL50:
+ 153:Core/Src/data_logger.c ****         {
+ 517              		.loc 1 153 12 view .LVU153
+ 518 008a 0028     		cmp	r0, #0
+ 519 008c E2D1     		bne	.L38
+ 155:Core/Src/data_logger.c ****             {
+ 520              		.loc 1 155 13 is_stmt 1 view .LVU154
+ 155:Core/Src/data_logger.c ****             {
+ 521              		.loc 1 155 17 is_stmt 0 view .LVU155
+ 522 008e FFF7FEFF 		bl	DataLogger_EraseAll
+ 523              	.LVL51:
+ 155:Core/Src/data_logger.c ****             {
+ 524              		.loc 1 155 16 view .LVU156
+ 525 0092 0028     		cmp	r0, #0
+ 526 0094 E4D1     		bne	.L40
+ 159:Core/Src/data_logger.c ****             s_next_sequence = 0U;
+ 527              		.loc 1 159 13 is_stmt 1 view .LVU157
+ 159:Core/Src/data_logger.c ****             s_next_sequence = 0U;
+ 528              		.loc 1 159 27 is_stmt 0 view .LVU158
+ 529 0096 0026     		movs	r6, #0
+ 530              	.LVL52:
+ 159:Core/Src/data_logger.c ****             s_next_sequence = 0U;
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 14
+
+
+ 531              		.loc 1 159 27 view .LVU159
+ 532 0098 044B     		ldr	r3, .L43+8
+ 533 009a 1E60     		str	r6, [r3]
+ 160:Core/Src/data_logger.c ****             valid_count = 0U;
+ 534              		.loc 1 160 13 is_stmt 1 view .LVU160
+ 160:Core/Src/data_logger.c ****             valid_count = 0U;
+ 535              		.loc 1 160 29 is_stmt 0 view .LVU161
+ 536 009c 044B     		ldr	r3, .L43+12
+ 537 009e 1E60     		str	r6, [r3]
+ 161:Core/Src/data_logger.c ****         }
+ 538              		.loc 1 161 13 is_stmt 1 view .LVU162
+ 539              	.LVL53:
+ 161:Core/Src/data_logger.c ****         }
+ 540              		.loc 1 161 13 is_stmt 0 view .LVU163
+ 541 00a0 D8E7     		b	.L38
+ 542              	.L44:
+ 543 00a2 00BF     		.align	2
+ 544              	.L43:
+ 545 00a4 00000000 		.word	__data_log_end
+ 546 00a8 00000000 		.word	__data_log_start
+ 547 00ac 00000000 		.word	.LANCHOR0
+ 548 00b0 00000000 		.word	.LANCHOR1
+ 549 00b4 00000000 		.word	.LANCHOR2
+ 550 00b8 00000000 		.word	.LANCHOR3
+ 551              		.cfi_endproc
+ 552              	.LFE1266:
+ 554              		.section	.text.DataLogger_Append,"ax",%progbits
+ 555              		.align	1
+ 556              		.global	DataLogger_Append
+ 557              		.syntax unified
+ 558              		.thumb
+ 559              		.thumb_func
+ 561              	DataLogger_Append:
+ 562              	.LVL54:
+ 563              	.LFB1267:
+ 169:Core/Src/data_logger.c **** 
+ 170:Core/Src/data_logger.c **** HAL_StatusTypeDef DataLogger_Append(uint32_t timestamp_seconds,
+ 171:Core/Src/data_logger.c ****                                     int16_t average_x100,
+ 172:Core/Src/data_logger.c ****                                     int16_t minimum_x100,
+ 173:Core/Src/data_logger.c ****                                     int16_t maximum_x100,
+ 174:Core/Src/data_logger.c ****                                     uint16_t sample_count)
+ 175:Core/Src/data_logger.c **** {
+ 564              		.loc 1 175 1 is_stmt 1 view -0
+ 565              		.cfi_startproc
+ 566              		@ args = 4, pretend = 0, frame = 40
+ 567              		@ frame_needed = 0, uses_anonymous_args = 0
+ 568              		.loc 1 175 1 is_stmt 0 view .LVU165
+ 569 0000 2DE9F043 		push	{r4, r5, r6, r7, r8, r9, lr}
+ 570              	.LCFI6:
+ 571              		.cfi_def_cfa_offset 28
+ 572              		.cfi_offset 4, -28
+ 573              		.cfi_offset 5, -24
+ 574              		.cfi_offset 6, -20
+ 575              		.cfi_offset 7, -16
+ 576              		.cfi_offset 8, -12
+ 577              		.cfi_offset 9, -8
+ 578              		.cfi_offset 14, -4
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 15
+
+
+ 579 0004 8BB0     		sub	sp, sp, #44
+ 580              	.LCFI7:
+ 581              		.cfi_def_cfa_offset 72
+ 582 0006 8046     		mov	r8, r0
+ 583 0008 0F46     		mov	r7, r1
+ 584 000a 9146     		mov	r9, r2
+ 585 000c 1E46     		mov	r6, r3
+ 586 000e BDF84840 		ldrh	r4, [sp, #72]
+ 176:Core/Src/data_logger.c ****     DataLogFlashRecord_t record = {0};
+ 587              		.loc 1 176 5 is_stmt 1 view .LVU166
+ 588              		.loc 1 176 26 is_stmt 0 view .LVU167
+ 589 0012 2022     		movs	r2, #32
+ 590              	.LVL55:
+ 591              		.loc 1 176 26 view .LVU168
+ 592 0014 0021     		movs	r1, #0
+ 593              	.LVL56:
+ 594              		.loc 1 176 26 view .LVU169
+ 595 0016 02A8     		add	r0, sp, #8
+ 596              	.LVL57:
+ 597              		.loc 1 176 26 view .LVU170
+ 598 0018 FFF7FEFF 		bl	memset
+ 599              	.LVL58:
+ 177:Core/Src/data_logger.c ****     uint32_t address;
+ 600              		.loc 1 177 5 is_stmt 1 view .LVU171
+ 178:Core/Src/data_logger.c ****     HAL_StatusTypeDef status = HAL_OK;
+ 601              		.loc 1 178 5 view .LVU172
+ 179:Core/Src/data_logger.c **** 
+ 180:Core/Src/data_logger.c ****     if (!s_initialized || sample_count == 0U)
+ 602              		.loc 1 180 5 view .LVU173
+ 603              		.loc 1 180 9 is_stmt 0 view .LVU174
+ 604 001c 334D     		ldr	r5, .L56
+ 605 001e 2D78     		ldrb	r5, [r5]	@ zero_extendqisi2
+ 606              		.loc 1 180 8 view .LVU175
+ 607 0020 002D     		cmp	r5, #0
+ 608 0022 5AD0     		beq	.L52
+ 609              		.loc 1 180 24 discriminator 1 view .LVU176
+ 610 0024 002C     		cmp	r4, #0
+ 611 0026 5DD0     		beq	.L53
+ 181:Core/Src/data_logger.c ****     {
+ 182:Core/Src/data_logger.c ****         return HAL_ERROR;
+ 183:Core/Src/data_logger.c ****     }
+ 184:Core/Src/data_logger.c **** 
+ 185:Core/Src/data_logger.c ****     if (s_write_index >= DATA_LOG_MAX_RECORDS)
+ 612              		.loc 1 185 5 is_stmt 1 view .LVU177
+ 613              		.loc 1 185 23 is_stmt 0 view .LVU178
+ 614 0028 314B     		ldr	r3, .L56+4
+ 615 002a 1A68     		ldr	r2, [r3]
+ 616              		.loc 1 185 26 view .LVU179
+ 617 002c 314B     		ldr	r3, .L56+8
+ 618 002e 3249     		ldr	r1, .L56+12
+ 619              		.loc 1 185 8 view .LVU180
+ 620 0030 5B1A     		subs	r3, r3, r1
+ 621 0032 B2EB531F 		cmp	r2, r3, lsr #5
+ 622 0036 0AD3     		bcc	.L47
+ 186:Core/Src/data_logger.c ****     {
+ 187:Core/Src/data_logger.c ****         if (DataLogger_EraseAll() != HAL_OK)
+ 623              		.loc 1 187 9 is_stmt 1 view .LVU181
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 16
+
+
+ 624              		.loc 1 187 13 is_stmt 0 view .LVU182
+ 625 0038 FFF7FEFF 		bl	DataLogger_EraseAll
+ 626              	.LVL59:
+ 627              		.loc 1 187 12 view .LVU183
+ 628 003c 0028     		cmp	r0, #0
+ 629 003e 53D1     		bne	.L54
+ 188:Core/Src/data_logger.c ****         {
+ 189:Core/Src/data_logger.c ****             return HAL_ERROR;
+ 190:Core/Src/data_logger.c ****         }
+ 191:Core/Src/data_logger.c ****         s_write_index = 0U;
+ 630              		.loc 1 191 9 is_stmt 1 view .LVU184
+ 631              		.loc 1 191 23 is_stmt 0 view .LVU185
+ 632 0040 0023     		movs	r3, #0
+ 633 0042 2B4A     		ldr	r2, .L56+4
+ 634 0044 1360     		str	r3, [r2]
+ 192:Core/Src/data_logger.c ****         s_next_sequence = 0U;
+ 635              		.loc 1 192 9 is_stmt 1 view .LVU186
+ 636              		.loc 1 192 25 is_stmt 0 view .LVU187
+ 637 0046 2D4A     		ldr	r2, .L56+16
+ 638 0048 1360     		str	r3, [r2]
+ 193:Core/Src/data_logger.c ****         s_record_count = 0U;
+ 639              		.loc 1 193 9 is_stmt 1 view .LVU188
+ 640              		.loc 1 193 24 is_stmt 0 view .LVU189
+ 641 004a 2D4A     		ldr	r2, .L56+20
+ 642 004c 1360     		str	r3, [r2]
+ 643              	.L47:
+ 194:Core/Src/data_logger.c ****     }
+ 195:Core/Src/data_logger.c **** 
+ 196:Core/Src/data_logger.c ****     record.magic = DATA_LOG_MAGIC;
+ 644              		.loc 1 196 5 is_stmt 1 view .LVU190
+ 645              		.loc 1 196 18 is_stmt 0 view .LVU191
+ 646 004e 2D4B     		ldr	r3, .L56+24
+ 647 0050 0293     		str	r3, [sp, #8]
+ 197:Core/Src/data_logger.c ****     record.sequence = s_next_sequence++;
+ 648              		.loc 1 197 5 is_stmt 1 view .LVU192
+ 649              		.loc 1 197 38 is_stmt 0 view .LVU193
+ 650 0052 2A4A     		ldr	r2, .L56+16
+ 651 0054 1368     		ldr	r3, [r2]
+ 652 0056 591C     		adds	r1, r3, #1
+ 653 0058 1160     		str	r1, [r2]
+ 654              		.loc 1 197 21 view .LVU194
+ 655 005a 0393     		str	r3, [sp, #12]
+ 198:Core/Src/data_logger.c ****     record.timestamp_seconds = timestamp_seconds;
+ 656              		.loc 1 198 5 is_stmt 1 view .LVU195
+ 657              		.loc 1 198 30 is_stmt 0 view .LVU196
+ 658 005c CDF81080 		str	r8, [sp, #16]
+ 199:Core/Src/data_logger.c ****     record.average_x100 = average_x100;
+ 659              		.loc 1 199 5 is_stmt 1 view .LVU197
+ 660              		.loc 1 199 25 is_stmt 0 view .LVU198
+ 661 0060 ADF81470 		strh	r7, [sp, #20]	@ movhi
+ 200:Core/Src/data_logger.c ****     record.minimum_x100 = minimum_x100;
+ 662              		.loc 1 200 5 is_stmt 1 view .LVU199
+ 663              		.loc 1 200 25 is_stmt 0 view .LVU200
+ 664 0064 ADF81690 		strh	r9, [sp, #22]	@ movhi
+ 201:Core/Src/data_logger.c ****     record.maximum_x100 = maximum_x100;
+ 665              		.loc 1 201 5 is_stmt 1 view .LVU201
+ 666              		.loc 1 201 25 is_stmt 0 view .LVU202
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 17
+
+
+ 667 0068 ADF81860 		strh	r6, [sp, #24]	@ movhi
+ 202:Core/Src/data_logger.c ****     record.sample_count = sample_count;
+ 668              		.loc 1 202 5 is_stmt 1 view .LVU203
+ 669              		.loc 1 202 25 is_stmt 0 view .LVU204
+ 670 006c ADF81A40 		strh	r4, [sp, #26]	@ movhi
+ 203:Core/Src/data_logger.c ****     record.reserved = 0xFFFFU;
+ 671              		.loc 1 203 5 is_stmt 1 view .LVU205
+ 672              		.loc 1 203 21 is_stmt 0 view .LVU206
+ 673 0070 4FF6FF73 		movw	r3, #65535
+ 674 0074 ADF81E30 		strh	r3, [sp, #30]	@ movhi
+ 204:Core/Src/data_logger.c ****     record.reserved2 = 0xFFFFFFFFUL;
+ 675              		.loc 1 204 5 is_stmt 1 view .LVU207
+ 676              		.loc 1 204 22 is_stmt 0 view .LVU208
+ 677 0078 4FF0FF33 		mov	r3, #-1
+ 678 007c 0893     		str	r3, [sp, #32]
+ 205:Core/Src/data_logger.c ****     record.reserved3[0] = 0xFFFFFFFFUL;
+ 679              		.loc 1 205 5 is_stmt 1 view .LVU209
+ 680              		.loc 1 205 25 is_stmt 0 view .LVU210
+ 681 007e 0993     		str	r3, [sp, #36]
+ 206:Core/Src/data_logger.c ****     record.crc = DataLogger_Crc16((const uint8_t *)&record,
+ 682              		.loc 1 206 5 is_stmt 1 view .LVU211
+ 683              		.loc 1 206 18 is_stmt 0 view .LVU212
+ 684 0080 1421     		movs	r1, #20
+ 685 0082 02A8     		add	r0, sp, #8
+ 686 0084 FFF7FEFF 		bl	DataLogger_Crc16
+ 687              	.LVL60:
+ 688              		.loc 1 206 16 view .LVU213
+ 689 0088 ADF81C00 		strh	r0, [sp, #28]	@ movhi
+ 207:Core/Src/data_logger.c ****                                   offsetof(DataLogFlashRecord_t, crc));
+ 208:Core/Src/data_logger.c **** 
+ 209:Core/Src/data_logger.c ****     address = DataLogger_Address(s_write_index);
+ 690              		.loc 1 209 5 is_stmt 1 view .LVU214
+ 691              		.loc 1 209 15 is_stmt 0 view .LVU215
+ 692 008c 184B     		ldr	r3, .L56+4
+ 693 008e 1868     		ldr	r0, [r3]
+ 694 0090 FFF7FEFF 		bl	DataLogger_Address
+ 695              	.LVL61:
+ 696 0094 0646     		mov	r6, r0
+ 697              	.LVL62:
+ 210:Core/Src/data_logger.c **** 
+ 211:Core/Src/data_logger.c ****     HAL_FLASH_Unlock();
+ 698              		.loc 1 211 5 is_stmt 1 view .LVU216
+ 699 0096 FFF7FEFF 		bl	HAL_FLASH_Unlock
+ 700              	.LVL63:
+ 212:Core/Src/data_logger.c ****     for (uint32_t offset = 0U; offset < sizeof(record); offset += 8U)
+ 701              		.loc 1 212 5 view .LVU217
+ 702              	.LBB7:
+ 703              		.loc 1 212 10 view .LVU218
+ 704              		.loc 1 212 19 is_stmt 0 view .LVU219
+ 705 009a 0024     		movs	r4, #0
+ 706              	.LBE7:
+ 178:Core/Src/data_logger.c **** 
+ 707              		.loc 1 178 23 view .LVU220
+ 708 009c 2546     		mov	r5, r4
+ 709              	.LVL64:
+ 710              	.L48:
+ 711              	.LBB9:
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 18
+
+
+ 712              		.loc 1 212 32 is_stmt 1 discriminator 1 view .LVU221
+ 713              		.loc 1 212 5 is_stmt 0 discriminator 1 view .LVU222
+ 714 009e 1F2C     		cmp	r4, #31
+ 715 00a0 0FD8     		bhi	.L50
+ 716              	.LBB8:
+ 213:Core/Src/data_logger.c ****     {
+ 214:Core/Src/data_logger.c ****         uint64_t value;
+ 717              		.loc 1 214 9 is_stmt 1 view .LVU223
+ 215:Core/Src/data_logger.c ****         memcpy(&value, ((const uint8_t *)&record) + offset, sizeof(value));
+ 718              		.loc 1 215 9 view .LVU224
+ 719 00a2 02AA     		add	r2, sp, #8
+ 720 00a4 1119     		adds	r1, r2, r4
+ 721 00a6 6B46     		mov	r3, sp
+ 722 00a8 1059     		ldr	r0, [r2, r4]	@ unaligned
+ 723 00aa 4968     		ldr	r1, [r1, #4]	@ unaligned
+ 724 00ac 03C3     		stmia	r3!, {r0, r1}
+ 216:Core/Src/data_logger.c ****         status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD,
+ 725              		.loc 1 216 9 view .LVU225
+ 726              		.loc 1 216 18 is_stmt 0 view .LVU226
+ 727 00ae DDE90023 		ldrd	r2, [sp]
+ 728 00b2 A119     		adds	r1, r4, r6
+ 729 00b4 0120     		movs	r0, #1
+ 730 00b6 FFF7FEFF 		bl	HAL_FLASH_Program
+ 731              	.LVL65:
+ 217:Core/Src/data_logger.c ****                                    address + offset,
+ 218:Core/Src/data_logger.c ****                                    value);
+ 219:Core/Src/data_logger.c ****         if (status != HAL_OK)
+ 732              		.loc 1 219 9 is_stmt 1 view .LVU227
+ 733              		.loc 1 219 12 is_stmt 0 view .LVU228
+ 734 00ba 0546     		mov	r5, r0
+ 735 00bc 08B9     		cbnz	r0, .L50
+ 736              	.LBE8:
+ 212:Core/Src/data_logger.c ****     {
+ 737              		.loc 1 212 57 is_stmt 1 view .LVU229
+ 212:Core/Src/data_logger.c ****     {
+ 738              		.loc 1 212 64 is_stmt 0 view .LVU230
+ 739 00be 0834     		adds	r4, r4, #8
+ 740              	.LVL66:
+ 212:Core/Src/data_logger.c ****     {
+ 741              		.loc 1 212 64 view .LVU231
+ 742 00c0 EDE7     		b	.L48
+ 743              	.LVL67:
+ 744              	.L50:
+ 212:Core/Src/data_logger.c ****     {
+ 745              		.loc 1 212 64 view .LVU232
+ 746              	.LBE9:
+ 220:Core/Src/data_logger.c ****         {
+ 221:Core/Src/data_logger.c ****             break;
+ 222:Core/Src/data_logger.c ****         }
+ 223:Core/Src/data_logger.c ****     }
+ 224:Core/Src/data_logger.c ****     HAL_FLASH_Lock();
+ 747              		.loc 1 224 5 is_stmt 1 view .LVU233
+ 748 00c2 FFF7FEFF 		bl	HAL_FLASH_Lock
+ 749              	.LVL68:
+ 225:Core/Src/data_logger.c **** 
+ 226:Core/Src/data_logger.c ****     if (status == HAL_OK)
+ 750              		.loc 1 226 5 view .LVU234
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 19
+
+
+ 751              		.loc 1 226 8 is_stmt 0 view .LVU235
+ 752 00c6 4DB9     		cbnz	r5, .L46
+ 227:Core/Src/data_logger.c ****     {
+ 228:Core/Src/data_logger.c ****         ++s_write_index;
+ 753              		.loc 1 228 9 is_stmt 1 view .LVU236
+ 754 00c8 094A     		ldr	r2, .L56+4
+ 755 00ca 1368     		ldr	r3, [r2]
+ 756 00cc 0133     		adds	r3, r3, #1
+ 757 00ce 1360     		str	r3, [r2]
+ 229:Core/Src/data_logger.c ****         ++s_record_count;
+ 758              		.loc 1 229 9 view .LVU237
+ 759 00d0 0B4A     		ldr	r2, .L56+20
+ 760 00d2 1368     		ldr	r3, [r2]
+ 761 00d4 0133     		adds	r3, r3, #1
+ 762 00d6 1360     		str	r3, [r2]
+ 763 00d8 00E0     		b	.L46
+ 764              	.LVL69:
+ 765              	.L52:
+ 182:Core/Src/data_logger.c ****     }
+ 766              		.loc 1 182 16 is_stmt 0 view .LVU238
+ 767 00da 0125     		movs	r5, #1
+ 768              	.LVL70:
+ 769              	.L46:
+ 230:Core/Src/data_logger.c ****     }
+ 231:Core/Src/data_logger.c **** 
+ 232:Core/Src/data_logger.c ****     return status;
+ 233:Core/Src/data_logger.c **** }
+ 770              		.loc 1 233 1 view .LVU239
+ 771 00dc 2846     		mov	r0, r5
+ 772 00de 0BB0     		add	sp, sp, #44
+ 773              	.LCFI8:
+ 774              		.cfi_remember_state
+ 775              		.cfi_def_cfa_offset 28
+ 776              		@ sp needed
+ 777 00e0 BDE8F083 		pop	{r4, r5, r6, r7, r8, r9, pc}
+ 778              	.LVL71:
+ 779              	.L53:
+ 780              	.LCFI9:
+ 781              		.cfi_restore_state
+ 182:Core/Src/data_logger.c ****     }
+ 782              		.loc 1 182 16 view .LVU240
+ 783 00e4 0125     		movs	r5, #1
+ 784 00e6 F9E7     		b	.L46
+ 785              	.L54:
+ 189:Core/Src/data_logger.c ****         }
+ 786              		.loc 1 189 20 view .LVU241
+ 787 00e8 0125     		movs	r5, #1
+ 788 00ea F7E7     		b	.L46
+ 789              	.L57:
+ 790              		.align	2
+ 791              	.L56:
+ 792 00ec 00000000 		.word	.LANCHOR3
+ 793 00f0 00000000 		.word	.LANCHOR0
+ 794 00f4 00000000 		.word	__data_log_end
+ 795 00f8 00000000 		.word	__data_log_start
+ 796 00fc 00000000 		.word	.LANCHOR1
+ 797 0100 00000000 		.word	.LANCHOR2
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 20
+
+
+ 798 0104 474F4C54 		.word	1414287175
+ 799              		.cfi_endproc
+ 800              	.LFE1267:
+ 802              		.section	.text.DataLogger_Read,"ax",%progbits
+ 803              		.align	1
+ 804              		.global	DataLogger_Read
+ 805              		.syntax unified
+ 806              		.thumb
+ 807              		.thumb_func
+ 809              	DataLogger_Read:
+ 810              	.LVL72:
+ 811              	.LFB1268:
+ 234:Core/Src/data_logger.c **** 
+ 235:Core/Src/data_logger.c **** HAL_StatusTypeDef DataLogger_Read(uint32_t index,
+ 236:Core/Src/data_logger.c ****                                   DataLogger_Record_t *record)
+ 237:Core/Src/data_logger.c **** {
+ 812              		.loc 1 237 1 is_stmt 1 view -0
+ 813              		.cfi_startproc
+ 814              		@ args = 0, pretend = 0, frame = 0
+ 815              		@ frame_needed = 0, uses_anonymous_args = 0
+ 816              		.loc 1 237 1 is_stmt 0 view .LVU243
+ 817 0000 38B5     		push	{r3, r4, r5, lr}
+ 818              	.LCFI10:
+ 819              		.cfi_def_cfa_offset 16
+ 820              		.cfi_offset 3, -16
+ 821              		.cfi_offset 4, -12
+ 822              		.cfi_offset 5, -8
+ 823              		.cfi_offset 14, -4
+ 238:Core/Src/data_logger.c ****     const DataLogFlashRecord_t *stored;
+ 824              		.loc 1 238 5 is_stmt 1 view .LVU244
+ 239:Core/Src/data_logger.c **** 
+ 240:Core/Src/data_logger.c ****     if (!s_initialized || record == NULL || index >= s_record_count)
+ 825              		.loc 1 240 5 view .LVU245
+ 826              		.loc 1 240 9 is_stmt 0 view .LVU246
+ 827 0002 144B     		ldr	r3, .L65
+ 828 0004 1B78     		ldrb	r3, [r3]	@ zero_extendqisi2
+ 829              		.loc 1 240 8 view .LVU247
+ 830 0006 E3B1     		cbz	r3, .L60
+ 831 0008 0C46     		mov	r4, r1
+ 832              		.loc 1 240 24 discriminator 1 view .LVU248
+ 833 000a E1B1     		cbz	r1, .L61
+ 834              		.loc 1 240 51 discriminator 2 view .LVU249
+ 835 000c 124B     		ldr	r3, .L65+4
+ 836 000e 1B68     		ldr	r3, [r3]
+ 837              		.loc 1 240 42 discriminator 2 view .LVU250
+ 838 0010 8342     		cmp	r3, r0
+ 839 0012 1AD9     		bls	.L62
+ 241:Core/Src/data_logger.c ****     {
+ 242:Core/Src/data_logger.c ****         return HAL_ERROR;
+ 243:Core/Src/data_logger.c ****     }
+ 244:Core/Src/data_logger.c **** 
+ 245:Core/Src/data_logger.c ****     stored = (const DataLogFlashRecord_t *)DataLogger_Address(index);
+ 840              		.loc 1 245 5 is_stmt 1 view .LVU251
+ 841              		.loc 1 245 44 is_stmt 0 view .LVU252
+ 842 0014 FFF7FEFF 		bl	DataLogger_Address
+ 843              	.LVL73:
+ 844              		.loc 1 245 44 view .LVU253
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 21
+
+
+ 845 0018 0546     		mov	r5, r0
+ 846              	.LVL74:
+ 246:Core/Src/data_logger.c ****     if (!DataLogger_IsValid(stored))
+ 847              		.loc 1 246 5 is_stmt 1 view .LVU254
+ 848              		.loc 1 246 10 is_stmt 0 view .LVU255
+ 849 001a FFF7FEFF 		bl	DataLogger_IsValid
+ 850              	.LVL75:
+ 851              		.loc 1 246 8 view .LVU256
+ 852 001e B0B1     		cbz	r0, .L63
+ 247:Core/Src/data_logger.c ****     {
+ 248:Core/Src/data_logger.c ****         return HAL_ERROR;
+ 249:Core/Src/data_logger.c ****     }
+ 250:Core/Src/data_logger.c **** 
+ 251:Core/Src/data_logger.c ****     record->sequence = stored->sequence;
+ 853              		.loc 1 251 5 is_stmt 1 view .LVU257
+ 854              		.loc 1 251 30 is_stmt 0 view .LVU258
+ 855 0020 6B68     		ldr	r3, [r5, #4]
+ 856              		.loc 1 251 22 view .LVU259
+ 857 0022 2360     		str	r3, [r4]
+ 252:Core/Src/data_logger.c ****     record->timestamp_seconds = stored->timestamp_seconds;
+ 858              		.loc 1 252 5 is_stmt 1 view .LVU260
+ 859              		.loc 1 252 39 is_stmt 0 view .LVU261
+ 860 0024 AB68     		ldr	r3, [r5, #8]
+ 861              		.loc 1 252 31 view .LVU262
+ 862 0026 6360     		str	r3, [r4, #4]
+ 253:Core/Src/data_logger.c ****     record->average_x100 = stored->average_x100;
+ 863              		.loc 1 253 5 is_stmt 1 view .LVU263
+ 864              		.loc 1 253 34 is_stmt 0 view .LVU264
+ 865 0028 B5F90C30 		ldrsh	r3, [r5, #12]
+ 866              		.loc 1 253 26 view .LVU265
+ 867 002c 2381     		strh	r3, [r4, #8]	@ movhi
+ 254:Core/Src/data_logger.c ****     record->minimum_x100 = stored->minimum_x100;
+ 868              		.loc 1 254 5 is_stmt 1 view .LVU266
+ 869              		.loc 1 254 34 is_stmt 0 view .LVU267
+ 870 002e B5F90E30 		ldrsh	r3, [r5, #14]
+ 871              		.loc 1 254 26 view .LVU268
+ 872 0032 6381     		strh	r3, [r4, #10]	@ movhi
+ 255:Core/Src/data_logger.c ****     record->maximum_x100 = stored->maximum_x100;
+ 873              		.loc 1 255 5 is_stmt 1 view .LVU269
+ 874              		.loc 1 255 34 is_stmt 0 view .LVU270
+ 875 0034 B5F91030 		ldrsh	r3, [r5, #16]
+ 876              		.loc 1 255 26 view .LVU271
+ 877 0038 A381     		strh	r3, [r4, #12]	@ movhi
+ 256:Core/Src/data_logger.c ****     record->sample_count = stored->sample_count;
+ 878              		.loc 1 256 5 is_stmt 1 view .LVU272
+ 879              		.loc 1 256 34 is_stmt 0 view .LVU273
+ 880 003a 6B8A     		ldrh	r3, [r5, #18]
+ 881              		.loc 1 256 26 view .LVU274
+ 882 003c E381     		strh	r3, [r4, #14]	@ movhi
+ 257:Core/Src/data_logger.c **** 
+ 258:Core/Src/data_logger.c ****     return HAL_OK;
+ 883              		.loc 1 258 5 is_stmt 1 view .LVU275
+ 884              		.loc 1 258 12 is_stmt 0 view .LVU276
+ 885 003e 0020     		movs	r0, #0
+ 886 0040 00E0     		b	.L59
+ 887              	.LVL76:
+ 888              	.L60:
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 22
+
+
+ 242:Core/Src/data_logger.c ****     }
+ 889              		.loc 1 242 16 view .LVU277
+ 890 0042 0120     		movs	r0, #1
+ 891              	.LVL77:
+ 892              	.L59:
+ 259:Core/Src/data_logger.c **** }
+ 893              		.loc 1 259 1 view .LVU278
+ 894 0044 38BD     		pop	{r3, r4, r5, pc}
+ 895              	.LVL78:
+ 896              	.L61:
+ 242:Core/Src/data_logger.c ****     }
+ 897              		.loc 1 242 16 view .LVU279
+ 898 0046 0120     		movs	r0, #1
+ 899              	.LVL79:
+ 242:Core/Src/data_logger.c ****     }
+ 900              		.loc 1 242 16 view .LVU280
+ 901 0048 FCE7     		b	.L59
+ 902              	.LVL80:
+ 903              	.L62:
+ 242:Core/Src/data_logger.c ****     }
+ 904              		.loc 1 242 16 view .LVU281
+ 905 004a 0120     		movs	r0, #1
+ 906              	.LVL81:
+ 242:Core/Src/data_logger.c ****     }
+ 907              		.loc 1 242 16 view .LVU282
+ 908 004c FAE7     		b	.L59
+ 909              	.LVL82:
+ 910              	.L63:
+ 248:Core/Src/data_logger.c ****     }
+ 911              		.loc 1 248 16 view .LVU283
+ 912 004e 0120     		movs	r0, #1
+ 913 0050 F8E7     		b	.L59
+ 914              	.L66:
+ 915 0052 00BF     		.align	2
+ 916              	.L65:
+ 917 0054 00000000 		.word	.LANCHOR3
+ 918 0058 00000000 		.word	.LANCHOR2
+ 919              		.cfi_endproc
+ 920              	.LFE1268:
+ 922              		.section	.text.DataLogger_GetRecordCount,"ax",%progbits
+ 923              		.align	1
+ 924              		.global	DataLogger_GetRecordCount
+ 925              		.syntax unified
+ 926              		.thumb
+ 927              		.thumb_func
+ 929              	DataLogger_GetRecordCount:
+ 930              	.LFB1269:
+ 260:Core/Src/data_logger.c **** 
+ 261:Core/Src/data_logger.c **** uint32_t DataLogger_GetRecordCount(void)
+ 262:Core/Src/data_logger.c **** {
+ 931              		.loc 1 262 1 is_stmt 1 view -0
+ 932              		.cfi_startproc
+ 933              		@ args = 0, pretend = 0, frame = 0
+ 934              		@ frame_needed = 0, uses_anonymous_args = 0
+ 935              		@ link register save eliminated.
+ 263:Core/Src/data_logger.c ****     return s_record_count;
+ 936              		.loc 1 263 5 view .LVU285
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 23
+
+
+ 264:Core/Src/data_logger.c **** }...
+ 937              		.loc 1 264 1 is_stmt 0 view .LVU286
+ 938 0000 014B     		ldr	r3, .L68
+ 939 0002 1868     		ldr	r0, [r3]
+ 940 0004 7047     		bx	lr
+ 941              	.L69:
+ 942 0006 00BF     		.align	2
+ 943              	.L68:
+ 944 0008 00000000 		.word	.LANCHOR2
+ 945              		.cfi_endproc
+ 946              	.LFE1269:
+ 948              		.section	.bss.s_initialized,"aw",%nobits
+ 949              		.set	.LANCHOR3,. + 0
+ 952              	s_initialized:
+ 953 0000 00       		.space	1
+ 954              		.section	.bss.s_next_sequence,"aw",%nobits
+ 955              		.align	2
+ 956              		.set	.LANCHOR1,. + 0
+ 959              	s_next_sequence:
+ 960 0000 00000000 		.space	4
+ 961              		.section	.bss.s_record_count,"aw",%nobits
+ 962              		.align	2
+ 963              		.set	.LANCHOR2,. + 0
+ 966              	s_record_count:
+ 967 0000 00000000 		.space	4
+ 968              		.section	.bss.s_write_index,"aw",%nobits
+ 969              		.align	2
+ 970              		.set	.LANCHOR0,. + 0
+ 973              	s_write_index:
+ 974 0000 00000000 		.space	4
+ 975              		.text
+ 976              	.Letext0:
+ 977              		.file 2 "g:\\arm\\10 2021.10\\arm-none-eabi\\include\\machine\\_default_types.h"
+ 978              		.file 3 "g:\\arm\\10 2021.10\\arm-none-eabi\\include\\sys\\_stdint.h"
+ 979              		.file 4 "g:\\arm\\10 2021.10\\lib\\gcc\\arm-none-eabi\\10.3.1\\include\\stddef.h"
+ 980              		.file 5 "Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_hal_def.h"
+ 981              		.file 6 "Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_hal_flash.h"
+ 982              		.file 7 "Core/Inc/app_conf.h"
+ 983              		.file 8 "Core/Inc/data_logger.h"
+ 984              		.file 9 "Drivers/STM32WBxx_HAL_Driver/Inc/stm32wbxx_hal_flash_ex.h"
+ 985              		.file 10 "<built-in>"
+ARM GAS  C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s 			page 24
+
+
+DEFINED SYMBOLS
+                            *ABS*:00000000 data_logger.c
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:20     .text.DataLogger_Crc16:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:25     .text.DataLogger_Crc16:00000000 DataLogger_Crc16
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:103    .text.DataLogger_Address:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:108    .text.DataLogger_Address:00000000 DataLogger_Address
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:126    .text.DataLogger_Address:00000008 $d
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:131    .text.DataLogger_IsEmpty:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:136    .text.DataLogger_IsEmpty:00000000 DataLogger_IsEmpty
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:192    .text.DataLogger_IsValid:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:197    .text.DataLogger_IsValid:00000000 DataLogger_IsValid
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:256    .text.DataLogger_IsValid:00000028 $d
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:261    .text.DataLogger_EraseAll:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:266    .text.DataLogger_EraseAll:00000000 DataLogger_EraseAll
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:343    .text.DataLogger_EraseAll:0000003c $d
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:349    .text.DataLogger_Init:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:355    .text.DataLogger_Init:00000000 DataLogger_Init
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:545    .text.DataLogger_Init:000000a4 $d
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:555    .text.DataLogger_Append:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:561    .text.DataLogger_Append:00000000 DataLogger_Append
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:792    .text.DataLogger_Append:000000ec $d
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:803    .text.DataLogger_Read:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:809    .text.DataLogger_Read:00000000 DataLogger_Read
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:917    .text.DataLogger_Read:00000054 $d
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:923    .text.DataLogger_GetRecordCount:00000000 $t
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:929    .text.DataLogger_GetRecordCount:00000000 DataLogger_GetRecordCount
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:944    .text.DataLogger_GetRecordCount:00000008 $d
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:952    .bss.s_initialized:00000000 s_initialized
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:953    .bss.s_initialized:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:955    .bss.s_next_sequence:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:959    .bss.s_next_sequence:00000000 s_next_sequence
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:962    .bss.s_record_count:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:966    .bss.s_record_count:00000000 s_record_count
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:969    .bss.s_write_index:00000000 $d
+C:\Users\843E~1\AppData\Local\Temp\cc28dGl1.s:973    .bss.s_write_index:00000000 s_write_index
+
+UNDEFINED SYMBOLS
+__data_log_start
+HAL_FLASH_Unlock
+HAL_FLASHEx_Erase
+HAL_FLASH_Lock
+__data_log_end
+memset
+HAL_FLASH_Program

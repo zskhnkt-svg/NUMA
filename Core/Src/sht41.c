@@ -1,162 +1,121 @@
-/* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file    sht41.c
-  * @brief   SHT41 sensor driver implementation
-  ******************************************************************************
-  */
-/* USER CODE END Header */
+ * @file sht41.c
+ * @brief Minimal SHT41 I2C driver.
+ */
 
-/* Includes ------------------------------------------------------------------*/
 #include "sht41.h"
-#include "string.h"
 
-/* USER CODE BEGIN 0 */
-
-/* CRC-8 calculation for SHT sensors */
-static uint8_t SHT41_Crc8(const uint8_t *data, int len)
+static uint8_t SHT41_Crc8(const uint8_t *data, uint8_t length)
 {
-    uint8_t crc = 0xFF;
-    for (int i = 0; i < len; i++) {
-        crc ^= data[i];
-        for (int j = 0; j < 8; j++) {
-            if (crc & 0x80) {
-                crc = (crc << 1) ^ 0x31;
-            } else {
-                crc = crc << 1;
-            }
-        }
+  uint8_t crc = 0xFF;
+
+  for (uint8_t i = 0; i < length; ++i)
+  {
+    crc ^= data[i];
+
+    for (uint8_t bit = 0; bit < 8; ++bit)
+    {
+      crc = (crc & 0x80U) ? (uint8_t)((crc << 1) ^ 0x31U)
+                           : (uint8_t)(crc << 1);
     }
-    return crc;
+  }
+
+  return crc;
 }
 
-/* USER CODE END 0 */
-
-/**
-  * @brief  Initialize SHT41 sensor
-  * @param  hi2c pointer to I2C handle
-  * @retval HAL status
-  */
 HAL_StatusTypeDef SHT41_Init(I2C_HandleTypeDef *hi2c)
 {
-    /* Perform soft reset */
-    return SHT41_Reset(hi2c);
+  uint8_t command = SHT41_CMD_SOFT_RESET;
+
+  HAL_StatusTypeDef status = HAL_I2C_Master_Transmit(
+      hi2c,
+      SHT41_I2C_ADDRESS,
+      &command,
+      1,
+      100);
+
+  if (status == HAL_OK)
+  {
+    /*
+     * SHT41 needs at least 1 ms after a soft reset before another command.
+     */
+    HAL_Delay(1);
+  }
+
+  return status;
 }
 
-/**
-  * @brief  Perform soft reset of SHT41
-  * @param  hi2c pointer to I2C handle
-  * @retval HAL status
-  */
-HAL_StatusTypeDef SHT41_Reset(I2C_HandleTypeDef *hi2c)
+HAL_StatusTypeDef SHT41_Read(I2C_HandleTypeDef *hi2c,
+                             SHT41_Data_t *data)
 {
-    uint8_t cmd[2] = {0x94, 0xBA};  /* Reset command */
-    HAL_StatusTypeDef status;
-    
-    status = HAL_I2C_Master_Transmit(hi2c, SHT41_ADDR_7BIT, cmd, 2, 100);
-    
-    if (status == HAL_OK) {
-        HAL_Delay(1);  /* Wait for reset to complete */
-    }
-    
+  if (data == NULL)
+  {
+    return HAL_ERROR;
+  }
+
+  uint8_t command = SHT41_CMD_MEASURE_HIGH;
+  uint8_t buffer[6];
+
+  HAL_StatusTypeDef status = HAL_I2C_Master_Transmit(
+      hi2c,
+      SHT41_I2C_ADDRESS,
+      &command,
+      1,
+      100);
+
+  if (status != HAL_OK)
+  {
     return status;
+  }
+
+  /*
+   * High precision measurement requires up to about 9 ms.
+   * HAL_Delay() sleeps using WFI in this project.
+   */
+  HAL_Delay(10);
+
+  status = HAL_I2C_Master_Receive(
+      hi2c,
+      SHT41_I2C_ADDRESS,
+      buffer,
+      sizeof(buffer),
+      100);
+
+  if (status != HAL_OK)
+  {
+    return status;
+  }
+
+  if (SHT41_Crc8(&buffer[0], 2) != buffer[2] ||
+      SHT41_Crc8(&buffer[3], 2) != buffer[5])
+  {
+    return HAL_ERROR;
+  }
+
+  uint16_t raw_temperature = ((uint16_t)buffer[0] << 8) | buffer[1];
+  uint16_t raw_humidity    = ((uint16_t)buffer[3] << 8) | buffer[4];
+
+  /*
+   * SHT41 conversion formulas from the datasheet.
+   */
+  data->temperature = -45.0f +
+                      (175.0f * (float)raw_temperature / 65535.0f);
+
+  data->humidity = -6.0f +
+                   (125.0f * (float)raw_humidity / 65535.0f);
+
+  /*
+   * Physical RH range is 0...100 %. The raw conversion can produce a
+   * slightly wider mathematical range at the edges.
+   */
+  if (data->humidity < 0.0f)
+  {
+    data->humidity = 0.0f;
+  }
+  else if (data->humidity > 100.0f)
+  {
+    data->humidity = 100.0f;
+  }
+
+  return HAL_OK;
 }
-
-/**
-  * @brief  Read raw sensor data from SHT41
-  * @param  hi2c pointer to I2C handle
-  * @param  temp_raw pointer to raw temperature value
-  * @param  humid_raw pointer to raw humidity value
-  * @retval HAL status
-  */
-HAL_StatusTypeDef SHT41_ReadRaw(I2C_HandleTypeDef *hi2c, uint16_t *temp_raw, uint16_t *humid_raw)
-{
-    HAL_StatusTypeDef status;
-    uint8_t cmd = SHT41_CMD_MEASURE_HIGH;  /* Measurement command (high precision) */
-    uint8_t rx_data[6];  /* 2 bytes temperature + 1 CRC + 2 bytes humidity + 1 CRC */
-    
-    /* Send measurement command */
-    status = HAL_I2C_Master_Transmit(hi2c, SHT41_ADDR_7BIT, &cmd, 1, 100);
-    if (status != HAL_OK) {
-        return status;
-    }
-    
-    /* Wait for measurement to complete (max 10ms for high precision) */
-    HAL_Delay(10);
-    
-    /* Read measurement data */
-    status = HAL_I2C_Master_Receive(hi2c, SHT41_ADDR_7BIT, rx_data, 6, 100);
-    if (status != HAL_OK) {
-        return status;
-    }
-    
-    /* Verify CRC for temperature */
-    uint8_t crc_temp = SHT41_Crc8(&rx_data[0], 2);
-    if (crc_temp != rx_data[2]) {
-        return HAL_ERROR;
-    }
-    
-    /* Verify CRC for humidity */
-    uint8_t crc_humid = SHT41_Crc8(&rx_data[3], 2);
-    if (crc_humid != rx_data[5]) {
-        return HAL_ERROR;
-    }
-    
-    /* Extract raw values (big-endian) */
-    *temp_raw = (rx_data[0] << 8) | rx_data[1];
-    *humid_raw = (rx_data[3] << 8) | rx_data[4];
-    
-    return HAL_OK;
-}
-
-/**
-  * @brief  Convert raw temperature value to degrees Celsius
-  * @param  raw_temp raw temperature value from sensor
-  * @retval Temperature in degrees Celsius
-  */
-float SHT41_ConvertTemperature(uint16_t raw_temp)
-{
-    return -45.0f + 175.0f * (raw_temp / 65536.0f);
-}
-
-/**
-  * @brief  Convert raw humidity value to %RH
-  * @param  raw_humid raw humidity value from sensor
-  * @retval Humidity in %RH
-  */
-float SHT41_ConvertHumidity(uint16_t raw_humid)
-{
-    return -6.0f + 125.0f * (raw_humid / 65536.0f);
-}
-
-/**
-  * @brief  Read temperature and humidity from SHT41
-  * @param  hi2c pointer to I2C handle
-  * @param  data pointer to SHT41_Data_t structure to store results
-  * @retval HAL status
-  */
-HAL_StatusTypeDef SHT41_Read(I2C_HandleTypeDef *hi2c, SHT41_Data_t *data)
-{
-    HAL_StatusTypeDef status;
-    uint16_t temp_raw, humid_raw;
-    
-    if (data == NULL) {
-        return HAL_ERROR;
-    }
-    
-    /* Read raw data */
-    status = SHT41_ReadRaw(hi2c, &temp_raw, &humid_raw);
-    if (status != HAL_OK) {
-        return status;
-    }
-    
-    /* Convert to physical values */
-    data->temperature = SHT41_ConvertTemperature(temp_raw);
-    data->humidity = SHT41_ConvertHumidity(humid_raw);
-    
-    return HAL_OK;
-}
-
-/* USER CODE BEGIN 1 */
-
-/* USER CODE END 1 */

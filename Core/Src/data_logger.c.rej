@@ -1,0 +1,19 @@
+--- Core/Src/data_logger.c	2026-10-05 18:08:28.511705143 +0000
++++ Core/Src/data_logger.c	2026-10-05 18:08:28.587705851 +0000
+@@ -31,7 +31,7 @@
+     uint16_t crc;
+     uint16_t reserved;
+     uint32_t reserved2;
+-    uint32_t reserved3[2];
++    uint32_t reserved3[1];
+ } DataLogFlashRecord_t;
+ 
+ _Static_assert(sizeof(DataLogFlashRecord_t) == DATA_LOG_RECORD_SIZE,
+@@ -203,7 +203,6 @@
+     record.reserved = 0xFFFFU;
+     record.reserved2 = 0xFFFFFFFFUL;
+     record.reserved3[0] = 0xFFFFFFFFUL;
+-    record.reserved3[1] = 0xFFFFFFFFUL;
+     record.crc = DataLogger_Crc16((const uint8_t *)&record,
+                                   offsetof(DataLogFlashRecord_t, crc));
+ 

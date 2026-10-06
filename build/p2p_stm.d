@@ -93,6 +93,7 @@ build/p2p_stm.o: Middlewares/ST/STM32_WPAN/ble/svc/Src/p2p_stm.c \
  Middlewares/ST/STM32_WPAN/ble/svc/Inc/tps.h \
  Middlewares/ST/STM32_WPAN/ble/svc/Inc/motenv_stm.h \
  Middlewares/ST/STM32_WPAN/ble/svc/Inc/p2p_stm.h \
+ Middlewares/ST/STM32_WPAN/ble/svc/Src/common_blesvc.h \
  Middlewares/ST/STM32_WPAN/ble/svc/Inc/zdd_stm.h \
  Middlewares/ST/STM32_WPAN/ble/svc/Inc/otas_stm.h \
  Middlewares/ST/STM32_WPAN/ble/svc/Inc/mesh.h \
@@ -198,6 +199,7 @@ Middlewares/ST/STM32_WPAN/ble/svc/Inc/lls.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/tps.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/motenv_stm.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/p2p_stm.h:
+Middlewares/ST/STM32_WPAN/ble/svc/Src/common_blesvc.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/zdd_stm.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/otas_stm.h:
 Middlewares/ST/STM32_WPAN/ble/svc/Inc/mesh.h:

@@ -94,6 +94,8 @@ Utilities/sequencer/stm32_seq.c \
 Core/Src/sysmem.c \
 Core/Src/syscalls.c \
 Core/Src/i2c.c \
+Core/Src/sensor_task.c \
+Core/Src/data_logger.c \
 Drivers/STM32WBxx_HAL_Driver/Src/stm32wbxx_hal_i2c.c \
 Drivers/STM32WBxx_HAL_Driver/Src/stm32wbxx_hal_i2c_ex.c
 

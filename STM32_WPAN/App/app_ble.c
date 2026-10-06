@@ -27,6 +27,7 @@
 #include "ble.h"
 #include "tl.h"
 #include "app_ble.h"
+#include <string.h>
 
 #include "stm32_seq.h"
 #include "shci.h"
@@ -34,10 +35,11 @@
 #include "otp.h"
 
 #include "p2p_server_app.h"
+#include "sensor_task.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -160,7 +162,6 @@ typedef struct
    * ID of the Advertising Timeout
    */
   uint8_t Advertising_mgr_timer_Id;
-
   uint8_t SwitchOffGPIO_timer_Id;
   /* USER CODE BEGIN PTD_1*/
 
@@ -172,14 +173,20 @@ typedef struct
 /* USER CODE END PTD */
 
 /* Private defines -----------------------------------------------------------*/
-#define APPBLE_GAP_DEVICE_NAME_LENGTH 7
+#define APPBLE_GAP_DEVICE_NAME_LENGTH 10   /* "Numa-XXXX" = 9 символов */
 #define FAST_ADV_TIMEOUT               (30*1000*1000/CFG_TS_TICK_VAL) /**< 30s */
 #define INITIAL_ADV_TIMEOUT            (60*1000*1000/CFG_TS_TICK_VAL) /**< 60s */
 
 #define BD_ADDR_SIZE_LOCAL    6
 
 /* USER CODE BEGIN PD */
-
+/* Reconnect supervisor: runs every BLE_SUPERVISOR_PERIOD_S seconds. */
+#define BLE_SUPERVISOR_PERIOD_S      15U
+#define BLE_SUPERVISOR_TICKS         ((BLE_SUPERVISOR_PERIOD_S * 1000U * 1000U) / CFG_TS_TICK_VAL)
+/* While not connected, re-arm advertising every N supervisor periods (20 x 15 s = 5 min). */
+#define BLE_ADV_REFRESH_PERIODS      20U
+/* Hardware watchdog (IWDG). Set to 0 to disable. Timeout is ~32 s, kicked by the supervisor. */
+#define APP_USE_IWDG                 1
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -189,10 +196,6 @@ typedef struct
 
 /* Private variables ---------------------------------------------------------*/
 PLACE_IN_SECTION("MB_MEM1") ALIGN(4) static TL_CmdPacket_t BleCmdBuffer;
-
-static uint16_t s_gap_service_handle;
-static uint16_t s_gap_dev_name_char_handle;
-static char s_device_name[CFG_GAP_DEVICE_NAME_LENGTH + 1];
 
 static const uint8_t a_MBdAddr[BD_ADDR_SIZE_LOCAL] =
 {
@@ -205,7 +208,7 @@ static const uint8_t a_MBdAddr[BD_ADDR_SIZE_LOCAL] =
 };
 
 static uint8_t a_BdAddrUdn[BD_ADDR_SIZE_LOCAL];
-
+static uint8_t a_bd_addr[6] = {0};
 /**
  *   Identity root key used to derive IRK and DHK(Legacy)
  */
@@ -239,7 +242,9 @@ uint8_t index_con_int, mutex;
  * Advertising Data
  */
 #if (P2P_SERVER1 != 0)
-static const char a_LocalName[] = {AD_TYPE_COMPLETE_LOCAL_NAME , 'P', '2', 'P', 'S', 'R', 'V', '1'};
+#define LOCAL_NAME_MAX_LEN   (1 + CFG_GAP_DEVICE_NAME_LENGTH)
+static uint8_t a_LocalName[LOCAL_NAME_MAX_LEN] = {AD_TYPE_COMPLETE_LOCAL_NAME, 'P', '2', 'P', 'S', 'R', 'V', '1'};
+static uint8_t a_LocalName_len = 8; /* дефолт: AD_TYPE + 7 символов */
 uint8_t a_ManufData[14] = {sizeof(a_ManufData)-1,
                            AD_TYPE_MANUFACTURER_SPECIFIC_DATA,
                            0x01,                               /*SKD version */
@@ -356,6 +361,9 @@ uint8_t a_ManufData[14] = {sizeof(a_ManufData)-1,
 #endif /* P2P_SERVER6 != 0 */
 
 /* USER CODE BEGIN PV */
+static uint8_t  s_supervisor_timer_id;
+static uint8_t  s_adv_failed;        /* last Adv_Request() did not succeed */
+static uint8_t  s_adv_refresh_cnt;
 
 /* USER CODE END PV */
 
@@ -365,10 +373,12 @@ static void BLE_StatusNot(HCI_TL_CmdStatus_t Status);
 static void Ble_Tl_Init(void);
 static void Ble_Hci_Gap_Gatt_Init(void);
 static const uint8_t* BleGetBdAddress(void);
-static void Adv_Request(APP_BLE_ConnStatus_t NewStatus);
+static tBleStatus Adv_Request(APP_BLE_ConnStatus_t NewStatus);
 static void Adv_Cancel(void);
 static void Adv_Cancel_Req(void);
 static void Switch_OFF_GPIO(void);
+static void Ble_Supervisor_Req(void);
+static void Ble_Supervisor(void);
 #if (L2CAP_REQUEST_NEW_CONN_PARAM != 0)
 static void BLE_SVC_L2CAP_Conn_Update(uint16_t ConnectionHandle);
 static void Connection_Interval_Update_Req(void);
@@ -510,9 +520,23 @@ void APP_BLE_Init(void)
    * Initialize P2P Server Application
    */
   P2PS_APP_Init();
+  SensorTask_Init();
 
   /* USER CODE BEGIN APP_BLE_Init_3 */
+  {
+    /* Имя в рекламном пакете = бренд + младшие байты MAC
+       (совпадает с GAP Device Name, см. Ble_Hci_Gap_Gatt_Init) */
+    char name[APPBLE_GAP_DEVICE_NAME_LENGTH + 1];
+    uint8_t name_len = (uint8_t)snprintf(name, sizeof(name),
+                                         "Numa-%02X%02X",
+                                         a_bd_addr[1], a_bd_addr[0]);
+    if (name_len > APPBLE_GAP_DEVICE_NAME_LENGTH)
+      name_len = APPBLE_GAP_DEVICE_NAME_LENGTH;
 
+    a_LocalName[0] = AD_TYPE_COMPLETE_LOCAL_NAME;
+    memcpy(&a_LocalName[1], name, name_len);
+    a_LocalName_len = name_len + 1;
+  }
   /* USER CODE END APP_BLE_Init_3 */
 
   /**
@@ -523,7 +547,6 @@ void APP_BLE_Init(void)
    * Create timer to handle the Led Switch OFF
    */
   HW_TS_Create(CFG_TIM_PROC_ID_ISR, &(BleApplicationContext.SwitchOffGPIO_timer_Id), hw_ts_SingleShot, Switch_OFF_GPIO);
-
   /**
    * Make device discoverable
    */
@@ -539,8 +562,28 @@ void APP_BLE_Init(void)
    */
   Adv_Request(APP_BLE_FAST_ADV);
 
-  /* USER CODE BEGIN APP_BLE_Init_2 */
+  /**
+   * Reconnect supervisor: guarantees the device never stays invisible
+   * (retries failed advertising, periodically re-arms it) and kicks the IWDG.
+   */
+  UTIL_SEQ_RegTask(1U << CFG_TASK_BLE_SUPERVISOR_ID, UTIL_SEQ_RFU, Ble_Supervisor);
+  HW_TS_Create(CFG_TIM_PROC_ID_ISR, &s_supervisor_timer_id, hw_ts_Repeated, Ble_Supervisor_Req);
+  HW_TS_Start(s_supervisor_timer_id, BLE_SUPERVISOR_TICKS);
+#if (APP_USE_IWDG != 0)
+  __HAL_DBGMCU_FREEZE_IWDG();         /* do not reset while halted in the debugger */
+  IWDG->KR  = 0xCCCCU;                /* start */
+  IWDG->KR  = 0x5555U;                /* unlock PR/RLR */
+  IWDG->PR  = 6U;                     /* LSI / 256 */
+  IWDG->RLR = 0x0FFFU;                /* ~32 s */
+  {
+    uint32_t guard = 1000000U;
+    while ((IWDG->SR != 0U) && (guard-- != 0U)) { }
+  }
+  IWDG->KR  = 0xAAAAU;                /* reload */
+#endif
 
+/* USER CODE BEGIN APP_BLE_Init_2 */
+  /* No startup LED indication: PA10 is reserved for BLE TX indication. */
   /* USER CODE END APP_BLE_Init_2 */
 
   return;
@@ -590,15 +633,19 @@ SVCCTL_UserEvtFlowStatus_t SVCCTL_App_Notification(void *p_Pckt)
 
       /* USER CODE END EVT_DISCONN_COMPLETE_1 */
 
-      /* restart advertising */
-      Adv_Request(APP_BLE_FAST_ADV);
+      /* restart advertising (only if we are really not connected any more) */
+      if ((BleApplicationContext.Device_Connection_Status != APP_BLE_CONNECTED_SERVER) &&
+          (BleApplicationContext.Device_Connection_Status != APP_BLE_CONNECTED_CLIENT))
+      {
+        Adv_Request(APP_BLE_FAST_ADV);
 
-      /**
-       * SPECIFIC to P2P Server APP
-       */
-      HandleNotification.P2P_Evt_Opcode = PEER_DISCON_HANDLE_EVT;
-      HandleNotification.ConnectionHandle = BleApplicationContext.BleApplicationContext_legacy.connectionHandle;
-      P2PS_APP_Notification(&HandleNotification);
+        /**
+         * SPECIFIC to P2P Server APP
+         */
+        HandleNotification.P2P_Evt_Opcode = PEER_DISCON_HANDLE_EVT;
+        HandleNotification.ConnectionHandle = BleApplicationContext.BleApplicationContext_legacy.connectionHandle;
+        P2PS_APP_Notification(&HandleNotification);
+      }
       /* USER CODE BEGIN EVT_DISCONN_COMPLETE */
 
       /* USER CODE END EVT_DISCONN_COMPLETE */
@@ -666,6 +713,14 @@ SVCCTL_UserEvtFlowStatus_t SVCCTL_App_Notification(void *p_Pckt)
         case HCI_LE_CONNECTION_COMPLETE_SUBEVT_CODE:
         {
           p_connection_complete_event = (hci_le_connection_complete_event_rp0 *) p_meta_evt->data;
+
+          if (p_connection_complete_event->Status != 0x00)
+          {
+            /* Connection attempt failed: make sure we keep advertising */
+            BleApplicationContext.Device_Connection_Status = APP_BLE_IDLE;
+            Adv_Request(APP_BLE_FAST_ADV);
+            break;
+          }
           /**
            * The connection is done, there is no need anymore to schedule the LP ADV
            */
@@ -763,6 +818,15 @@ SVCCTL_UserEvtFlowStatus_t SVCCTL_App_Notification(void *p_Pckt)
           break; /* ACI_HAL_END_OF_RADIO_ACTIVITY_VSEVT_CODE */
 #endif /* RADIO_ACTIVITY_EVENT != 0 */
 
+        case ACI_GAP_BOND_LOST_VSEVT_CODE:
+          /*
+           * The phone still has a bond for this device, but the bond keys are gone
+           * on our side (reflash / NVM erase). Let the phone re-pair instead of
+           * being refused forever.
+           */
+          aci_gap_allow_rebond(BleApplicationContext.BleApplicationContext_legacy.connectionHandle);
+          break;
+
         case ACI_GATT_INDICATION_VSEVT_CODE:
         {
           APP_DBG_MSG(">>== ACI_GATT_INDICATION_VSEVT_CODE \r");
@@ -771,24 +835,7 @@ SVCCTL_UserEvtFlowStatus_t SVCCTL_App_Notification(void *p_Pckt)
         break;
 
         /* USER CODE BEGIN BLUE_EVT */
-    case ACI_GATT_ATTRIBUTE_MODIFIED_VSEVT_CODE:
-    {
-      aci_gatt_attribute_modified_event_rp0 *p_attr_mod =
-          (aci_gatt_attribute_modified_event_rp0*) p_blecore_evt->data;
 
-      if (p_attr_mod->Attr_Handle == (s_gap_dev_name_char_handle + 1))
-      {
-        uint8_t len = p_attr_mod->Attr_Data_Length;
-        if (len > CFG_GAP_DEVICE_NAME_LENGTH) len = CFG_GAP_DEVICE_NAME_LENGTH;
-
-        memcpy(s_device_name, p_attr_mod->Attr_Data, len);
-        s_device_name[len] = '\0';
-
-        APP_SaveDeviceName(s_device_name, len);
-        APP_DBG_MSG("BLE: Device name changed and saved: %s\n", s_device_name);
-      }
-      break;
-    }
         /* USER CODE END BLUE_EVT */
       }
       break; /* HCI_VENDOR_SPECIFIC_DEBUG_EVT_CODE */
@@ -873,6 +920,9 @@ static void Ble_Hci_Gap_Gatt_Init(void)
     APP_DBG_MSG("  Success: aci_hal_write_config_data command - CONFIG_DATA_PUBADDR_OFFSET\n");
     APP_DBG_MSG("  Public Bluetooth Address: %02x:%02x:%02x:%02x:%02x:%02x\n",p_bd_addr[5],p_bd_addr[4],p_bd_addr[3],p_bd_addr[2],p_bd_addr[1],p_bd_addr[0]);
   }
+
+  /* MAC сохраняем — из него формируем заводское имя Numa-XXXX */
+  memcpy(a_bd_addr, p_bd_addr, 6);
 
 #if (CFG_BLE_ADDRESS_TYPE == GAP_PUBLIC_ADDR)
   /* BLE MAC in ADV Packet */
@@ -987,7 +1037,15 @@ static void Ble_Hci_Gap_Gatt_Init(void)
 
   if (role > 0)
   {
-    const char *name = "P2PSRV1";
+    /* Заводское имя: бренд + 2 младших байта MAC.
+       Формируется только в прошивке, из приложения не меняется. */
+    char name[APPBLE_GAP_DEVICE_NAME_LENGTH + 1];
+    uint8_t name_len = (uint8_t)snprintf(name, sizeof(name),
+                                         "Numa-%02X%02X",
+                                         a_bd_addr[1], a_bd_addr[0]);
+    if (name_len > APPBLE_GAP_DEVICE_NAME_LENGTH)
+      name_len = APPBLE_GAP_DEVICE_NAME_LENGTH;
+
     ret = aci_gap_init(role,
                        CFG_PRIVACY,
                        APPBLE_GAP_DEVICE_NAME_LENGTH,
@@ -1004,7 +1062,7 @@ static void Ble_Hci_Gap_Gatt_Init(void)
       APP_DBG_MSG("  Success: aci_gap_init command\n");
     }
 
-    ret = aci_gatt_update_char_value(gap_service_handle, gap_dev_name_char_handle, 0, strlen(name), (uint8_t *) name);
+    ret = aci_gatt_update_char_value(gap_service_handle, gap_dev_name_char_handle, 0, name_len, (uint8_t *) name);
     if (ret != BLE_STATUS_SUCCESS)
     {
       BLE_DBG_SVCCTL_MSG("  Fail   : aci_gatt_update_char_value - Device Name\n");
@@ -1105,9 +1163,10 @@ static void Ble_Hci_Gap_Gatt_Init(void)
   APP_DBG_MSG("==>> End Ble_Hci_Gap_Gatt_Init function\n\r");
 }
 
-static void Adv_Request(APP_BLE_ConnStatus_t NewStatus)
+static tBleStatus Adv_Request(APP_BLE_ConnStatus_t NewStatus)
 {
   tBleStatus ret = BLE_STATUS_INVALID_PARAMS;
+  tBleStatus result = BLE_STATUS_SUCCESS;
   uint16_t Min_Inter, Max_Inter;
 
   if (NewStatus == APP_BLE_FAST_ADV)
@@ -1127,9 +1186,8 @@ static void Adv_Request(APP_BLE_ConnStatus_t NewStatus)
    */
   HW_TS_Stop(BleApplicationContext.Advertising_mgr_timer_Id);
 
-  if ((NewStatus == APP_BLE_LP_ADV)
-      && ((BleApplicationContext.Device_Connection_Status == APP_BLE_FAST_ADV)
-          || (BleApplicationContext.Device_Connection_Status == APP_BLE_LP_ADV)))
+  if ((BleApplicationContext.Device_Connection_Status == APP_BLE_FAST_ADV)
+      || (BleApplicationContext.Device_Connection_Status == APP_BLE_LP_ADV))
   {
     /* Connection in ADVERTISE mode have to stop the current advertising */
     ret = aci_gap_set_non_discoverable();
@@ -1150,7 +1208,7 @@ static void Adv_Request(APP_BLE_ConnStatus_t NewStatus)
                                  Max_Inter,
                                  CFG_BLE_ADDRESS_TYPE,
                                  NO_WHITE_LIST_USE, /* use white list */
-                                 sizeof(a_LocalName),
+                                 a_LocalName_len,
                                  (uint8_t*) &a_LocalName,
                                  BleApplicationContext.BleApplicationContext_legacy.advtServUUIDlen,
                                  BleApplicationContext.BleApplicationContext_legacy.advtServUUID,
@@ -1159,6 +1217,7 @@ static void Adv_Request(APP_BLE_ConnStatus_t NewStatus)
   if (ret != BLE_STATUS_SUCCESS)
   {
     APP_DBG_MSG("==>> aci_gap_set_discoverable - fail, result: 0x%x \n", ret);
+    result = ret;
   }
   else
   {
@@ -1169,6 +1228,7 @@ static void Adv_Request(APP_BLE_ConnStatus_t NewStatus)
   ret = aci_gap_update_adv_data(sizeof(a_ManufData), (uint8_t*) a_ManufData);
   if (ret != BLE_STATUS_SUCCESS)
   {
+    result = ret;
     if (NewStatus == APP_BLE_FAST_ADV)
     {
       APP_DBG_MSG("==>> Start Fast Advertising Failed , result: %d \n\r", ret);
@@ -1192,7 +1252,11 @@ static void Adv_Request(APP_BLE_ConnStatus_t NewStatus)
     }
   }
 
-  return;
+  /* Remember failures so the supervisor can retry */
+  s_adv_failed = (result != BLE_STATUS_SUCCESS) ? 1U : 0U;
+  s_adv_refresh_cnt = 0U;
+
+  return result;
 }
 
 const uint8_t* BleGetBdAddress(void)
@@ -1254,33 +1318,63 @@ const uint8_t* BleGetBdAddress(void)
  *************************************************************/
 static void Adv_Cancel(void)
 {
-  /* USER CODE BEGIN Adv_Cancel_1 */
-
-  /* USER CODE END Adv_Cancel_1 */
-
+  /*
+   * Do not leave the device invisible after the fast-advertising timeout.
+   * Continue advertising with the low-power interval until a central connects.
+   */
   if (BleApplicationContext.Device_Connection_Status != APP_BLE_CONNECTED_SERVER)
   {
-    tBleStatus ret = BLE_STATUS_INVALID_PARAMS;
-
-    ret = aci_gap_set_non_discoverable();
-
-    BleApplicationContext.Device_Connection_Status = APP_BLE_IDLE;
-    if (ret != BLE_STATUS_SUCCESS)
-    {
-      APP_DBG_MSG("** STOP ADVERTISING **  Failed \r\n\r");
-    }
-    else
-    {
-      APP_DBG_MSG("  \r\n\r");
-      APP_DBG_MSG("** STOP ADVERTISING **  \r\n\r");
-    }
+    Adv_Request(APP_BLE_LP_ADV);
   }
+}
 
-  /* USER CODE BEGIN Adv_Cancel_2 */
+/**
+ * Timer callback (ISR context): only schedules the supervisor task.
+ */
+static void Ble_Supervisor_Req(void)
+{
+  UTIL_SEQ_SetTask(1U << CFG_TASK_BLE_SUPERVISOR_ID, CFG_SCH_PRIO_0);
+}
 
-  /* USER CODE END Adv_Cancel_2 */
+/**
+ * Runs every BLE_SUPERVISOR_PERIOD_S seconds in task context.
+ * - kicks the hardware watchdog
+ * - if not connected: retries failed advertising and periodically re-arms it
+ */
+static void Ble_Supervisor(void)
+{
+#if (APP_USE_IWDG != 0)
+  IWDG->KR = 0xAAAAU;
+#endif
 
-  return;
+  switch (BleApplicationContext.Device_Connection_Status)
+  {
+    case APP_BLE_CONNECTED_SERVER:
+    case APP_BLE_CONNECTED_CLIENT:
+      s_adv_refresh_cnt = 0U;
+      break;
+
+    case APP_BLE_FAST_ADV:
+      /* The 60 s fast-advertising timer will switch to low power advertising */
+      if (s_adv_failed != 0U)
+      {
+        (void)Adv_Request(APP_BLE_LP_ADV);
+      }
+      break;
+
+    case APP_BLE_LP_ADV:
+      if ((s_adv_failed != 0U) || (++s_adv_refresh_cnt >= BLE_ADV_REFRESH_PERIODS))
+      {
+        (void)Adv_Request(APP_BLE_LP_ADV);
+      }
+      break;
+
+    case APP_BLE_IDLE:
+    default:
+      /* Not connected and not advertising: should never happen, recover */
+      (void)Adv_Request(APP_BLE_LP_ADV);
+      break;
+  }
 }
 
 static void Adv_Cancel_Req(void)
@@ -1301,8 +1395,32 @@ static void Adv_Cancel_Req(void)
 static void Switch_OFF_GPIO()
 {
   /* USER CODE BEGIN Switch_OFF_GPIO */
-
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_10, DEBUG_LED_OFF_LEVEL);
   /* USER CODE END Switch_OFF_GPIO */
+}
+
+void APP_BLE_Led_Blink(uint32_t duration_ms)
+{
+    uint32_t timeout_ticks;
+
+    /*
+     * This is a single-shot timer. Explicitly stop the previous shot before
+     * rearming it so repeated BLE notifications can never leave a stale LED
+     * timer in the timer-server list.
+     */
+    HW_TS_Stop(BleApplicationContext.SwitchOffGPIO_timer_Id);
+
+    timeout_ticks = (uint32_t)(((uint64_t)duration_ms * 1000ULL +
+                                (CFG_TS_TICK_VAL - 1U)) /
+                               CFG_TS_TICK_VAL);
+    if (timeout_ticks == 0U)
+    {
+        timeout_ticks = 1U;
+    }
+
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_10, DEBUG_LED_ON_LEVEL);
+    HW_TS_Start(BleApplicationContext.SwitchOffGPIO_timer_Id,
+                timeout_ticks);
 }
 
 #if (L2CAP_REQUEST_NEW_CONN_PARAM != 0)
@@ -1364,17 +1482,6 @@ static void Connection_Interval_Update_Req(void)
  *
  *************************************************************/
 
-void APP_BLE_RenameDevice(const uint8_t *p_name, uint8_t len)
-{
-  memset(s_device_name, 0, sizeof(s_device_name));
-  memcpy(s_device_name, p_name, len);
-  s_device_name[len] = '\0';
-
-  APP_SaveDeviceName(s_device_name, len);
-
-  aci_gatt_update_char_value(s_gap_service_handle, s_gap_dev_name_char_handle,
-                              0, len, (uint8_t*)s_device_name);
-}
 
 void hci_notify_asynch_evt(void* p_Data)
 {

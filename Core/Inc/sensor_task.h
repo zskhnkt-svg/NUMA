@@ -1,24 +1,32 @@
-/**
- * @file    sensor_task.h
- * @brief   Задача опроса SHT3x — на базе STM32 Sequencer + HW Timer Server
- *          (БЕЗ FreeRTOS)
- */
-
-#ifndef CORE_INC_SENSOR_TASK_H_
-#define CORE_INC_SENSOR_TASK_H_
+#ifndef SENSOR_TASK_H
+#define SENSOR_TASK_H
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/**
- * @brief  Инициализация: регистрация задачи в Sequencer и запуск таймера.
- *         Вызывать ОДИН РАЗ из APPE_Init() после BLE стека.
+#include <stdint.h>
+
+/*
+ * SHT41 measurement cycle:
+ *   1. power sensor on
+ *   2. initialize I2C / reset sensor
+ *   3. measure temperature
+ *   4. send temperature through BLE notification
+ *   5. power sensor off
+ *   6. wait 5 seconds
+ *
+ * The task itself is executed by the STM32WB sequencer, so the MCU can
+ * enter STOP2 between events.
  */
+
 void SensorTask_Init(void);
+void SensorTask_Start(void);
+void SensorTask_Stop(void);
+void SensorTask_RequestMeasurement(void);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* CORE_INC_SENSOR_TASK_H_ */
+#endif /* SENSOR_TASK_H */

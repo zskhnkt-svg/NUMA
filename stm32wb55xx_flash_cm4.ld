@@ -39,10 +39,15 @@ ENTRY(Reset_Handler)
 /* Specify the memory areas */
 MEMORY
 {
-FLASH (rx)                 : ORIGIN = 0x08000000, LENGTH = 512K
+FLASH (rx)                 : ORIGIN = 0x08000000, LENGTH = 480K
+FLASH_LOG (rx)             : ORIGIN = 0x08078000, LENGTH = 32K
 RAM1 (xrw)                 : ORIGIN = 0x20000008, LENGTH = 0x2FFF8
 RAM_SHARED (xrw)           : ORIGIN = 0x20030000, LENGTH = 10K
 }
+/* Temperature journal: reserved from the application image. */
+PROVIDE(__data_log_start = ORIGIN(FLASH_LOG));
+PROVIDE(__data_log_end   = ORIGIN(FLASH_LOG) + LENGTH(FLASH_LOG));
+
 /* Highest address of the user mode stack */
 _estack = 0x20030000;    /* end of RAM */
 /* Generate a link error if heap and stack don't fit into RAM */
@@ -233,5 +238,3 @@ SECTIONS
     _eMB_MEM2 = . ;
   } >RAM_SHARED AT> FLASH
 }
-
-
